@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Optional, Tuple
+from typing import Iterable, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -20,6 +20,7 @@ class TrackEvent:
     profile_id: str
     confidence: float
     box: Tuple[int, int, int, int]
+    has_cup: bool = False
 
 
 class ProfileTracker:
@@ -33,19 +34,32 @@ class ProfileTracker:
         encoder: str = "mobilenet_v3_small",
         conf: float = 0.5,
         match_threshold: float = 0.55,
+        profile_window: int = 5,
+        enable_cup_detection: bool = True,
     ) -> None:
         self.model = YOLO(model_name)
         self.extractor = FeatureExtractor(device=device, encoder=encoder)
-        self.store = ProfileStore(profiles_path)
+        self.store = ProfileStore(profiles_path, window_size=profile_window)
         self.conf = conf
         self.match_threshold = match_threshold
+        self.drink_labels = {"cup", "wine glass", "bottle"}
+        self.cup_iou_threshold = 0.15
+        self.enable_cup_detection = enable_cup_detection
 
-    def _process_boxes(self, frame: np.ndarray, results) -> Iterable[TrackEvent]:
+    def _process_boxes(
+        self, frame: np.ndarray, results
+    ) -> Tuple[List[TrackEvent], List[Tuple[int, int, int, int]]]:
         boxes = results.boxes
+        events: List[TrackEvent] = []
+        cup_boxes: List[Tuple[int, int, int, int]] = []
+        names = getattr(results, "names", None) or getattr(
+            getattr(self.model, "model", None), "names", {}
+        )
         for box in boxes:
             cls_id = int(box.cls[0])
-            if cls_id != 0:  # YOLO class 0 == person
-                continue
+            cls_name = (
+                names.get(cls_id, str(cls_id)) if isinstance(names, dict) else str(cls_id)
+            )
             conf = float(box.conf[0])
             if conf < self.conf:
                 continue
@@ -54,6 +68,11 @@ class ProfileTracker:
             x1, y1, x2, y2 = self.extractor.preprocess_box(
                 (x1, y1, x2, y2), frame.shape
             )
+            if self.enable_cup_detection and cls_name in self.drink_labels:
+                cup_boxes.append((x1, y1, x2, y2))
+                continue
+            if cls_name != "person":
+                continue
             crop = frame[y1:y2, x1:x2]
             if crop.size == 0:
                 continue
@@ -65,12 +84,48 @@ class ProfileTracker:
             else:
                 profile_id, match_score = match
                 self.store.register_embedding(embedding, profile_id=profile_id)
-            yield TrackEvent(
-                frame_idx=-1,  # Patched in by caller
-                profile_id=profile_id,
-                confidence=min(match_score, 1.0),
-                box=(x1, y1, x2, y2),
+            events.append(
+                TrackEvent(
+                    frame_idx=-1,  # Patched in by caller
+                    profile_id=profile_id,
+                    confidence=min(match_score, 1.0),
+                    box=(x1, y1, x2, y2),
+                )
             )
+        return events, cup_boxes
+
+    def _assign_cups(
+        self,
+        events: Iterable[TrackEvent],
+        cup_boxes: Iterable[Tuple[int, int, int, int]],
+    ) -> None:
+        if not self.enable_cup_detection:
+            return
+        for event in events:
+            for cup_box in cup_boxes:
+                if self._iou(event.box, cup_box) >= self.cup_iou_threshold:
+                    event.has_cup = True
+                    break
+
+    @staticmethod
+    def _iou(box_a: Tuple[int, int, int, int], box_b: Tuple[int, int, int, int]) -> float:
+        ax1, ay1, ax2, ay2 = box_a
+        bx1, by1, bx2, by2 = box_b
+        inter_x1 = max(ax1, bx1)
+        inter_y1 = max(ay1, by1)
+        inter_x2 = min(ax2, bx2)
+        inter_y2 = min(ay2, by2)
+        inter_w = max(0, inter_x2 - inter_x1)
+        inter_h = max(0, inter_y2 - inter_y1)
+        inter_area = inter_w * inter_h
+        if inter_area == 0:
+            return 0.0
+        area_a = max(0, ax2 - ax1) * max(0, ay2 - ay1)
+        area_b = max(0, bx2 - bx1) * max(0, by2 - by1)
+        union = area_a + area_b - inter_area
+        if union <= 0:
+            return 0.0
+        return inter_area / union
 
     @staticmethod
     def _draw_event(frame: np.ndarray, event: TrackEvent) -> None:
@@ -78,7 +133,8 @@ class ProfileTracker:
         x1, y1, x2, y2 = event.box
         color = (0, 255, 0)
         cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-        label = f"{event.profile_id} {event.confidence:.2f}"
+        cup_flag = " cup" if event.has_cup else ""
+        label = f"{event.profile_id} {event.confidence:.2f}{cup_flag}"
         text_origin = (x1, max(15, y1 - 10))
         cv2.putText(
             frame,
@@ -117,12 +173,14 @@ class ProfileTracker:
             if not ret:
                 break
             model_results = self.model(frame, verbose=False)[0]
-            events = list(self._process_boxes(frame, model_results))
+            events, cup_boxes = self._process_boxes(frame, model_results)
+            self._assign_cups(events, cup_boxes)
             for event in events:
                 event.frame_idx = frame_counter
                 print(
                     f"[bold green]frame {event.frame_idx:06d}[/] -> {event.profile_id} "
                     f"(similarity={event.confidence:.2f})"
+                    + (" [cup]" if event.has_cup else "")
                 )
             for event in events:
                 self._draw_event(frame, event)

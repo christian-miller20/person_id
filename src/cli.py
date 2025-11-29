@@ -27,11 +27,21 @@ def process(
     match_threshold: float = typer.Option(
         0.55, "--match-threshold", help="Cosine similarity needed to reidentify."
     ),
+    profile_window: int = typer.Option(
+        5,
+        "--profile-window",
+        help="Number of recent embeddings to average per profile (0 disables window).",
+    ),
     output: Optional[Path] = typer.Option(
         None, "--output", "-o", help="Optional path to save annotated video."
     ),
     limit_frames: Optional[int] = typer.Option(
         None, "--limit-frames", help="Stop after N frames for quick checks."
+    ),
+    enable_cups: bool = typer.Option(
+        True,
+        "--cups/--no-cups",
+        help="Enable cup/wine glass/bottle detection and tagging.",
     ),
 ) -> None:
     """Run the YOLO + embedding pipeline and update the profile store."""
@@ -42,6 +52,8 @@ def process(
         encoder=encoder,
         conf=conf,
         match_threshold=match_threshold,
+        profile_window=profile_window,
+        enable_cup_detection=enable_cups,
     )
     tracker.process_video(
         source=str(source),

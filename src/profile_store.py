@@ -14,6 +14,7 @@ class Profile:
     embedding: List[float]
     num_samples: int = 1
     metadata: Dict[str, str] = field(default_factory=dict)
+    history: List[List[float]] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, object]:
         return {
@@ -21,24 +22,35 @@ class Profile:
             "embedding": self.embedding,
             "num_samples": self.num_samples,
             "metadata": self.metadata,
+            "history": self.history,
         }
 
     @classmethod
     def from_dict(cls, payload: Dict[str, object]) -> "Profile":
+        embedding = list(payload["embedding"])
+        history = payload.get("history")
+        if not history:
+            history = [embedding]
         return cls(
             profile_id=str(payload["profile_id"]),
-            embedding=list(payload["embedding"]),
+            embedding=embedding,
             num_samples=int(payload.get("num_samples", 1)),
             metadata=dict(payload.get("metadata", {})),
+            history=[list(v) for v in history],
         )
 
 
 class ProfileStore:
     """Lightweight JSON-backed storage for per-person embeddings."""
 
-    def __init__(self, path: Path | str = "profiles/profiles.json") -> None:
+    def __init__(
+        self, path: Path | str = "profiles/profiles.json", window_size: int = 5
+    ) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        if window_size < 0:
+            raise ValueError("window_size must be >= 0")
+        self.window_size = window_size
         self._profiles: Dict[str, Profile] = {}
         self._load()
 
@@ -100,18 +112,19 @@ class ProfileStore:
                 embedding=embedding.tolist(),
                 num_samples=1,
                 metadata=metadata or {},
+                history=[embedding.tolist()],
             )
             self._profiles[profile_id] = profile
         else:
-            # Running mean update for embeddings.
-            reference = np.asarray(profile.embedding)
-            updated = (reference * profile.num_samples + embedding) / (
-                profile.num_samples + 1
-            )
-            profile.embedding = updated.tolist()
+            reference = profile.history or []
+            reference.append(embedding.tolist())
+            if self.window_size > 0 and len(reference) > self.window_size:
+                reference = reference[-self.window_size :]
+            profile.history = reference
+            stacked = np.asarray(reference, dtype=np.float32)
+            profile.embedding = stacked.mean(axis=0).tolist()
             profile.num_samples += 1
             if metadata:
                 profile.metadata.update(metadata)
         self.save()
         return profile_id
-

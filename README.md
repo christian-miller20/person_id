@@ -25,8 +25,12 @@ Useful options:
 - `--encoder mobilenet_v3_small` keeps embeddings lightweight for edge devices; switch to `resnet18` if you need sharper identities.
 - `--match-threshold 0.6` to demand higher similarity before reusing a profile.
 - `--limit-frames 200` to stop early while iterating.
+- `--profile-window 5` averages the last N embeddings for each profile so short-term pose or clothing changes stay linked; set to `0` to revert to a simple running mean.
+- `--no-cups` disables cup/wine glass/bottle detection so only person profiles are produced.
 
-Profiles are stored as averaged embeddings and can be inspected via `profiles/profiles.json`. You can bootstrap the store with known subjects by capturing a few clean frames and letting the tracker run; subsequent sequences will reuse the saved IDs whenever cosine similarity stays above the threshold.
+Profiles are stored as averaged embeddings (by default the mean of the last 5 observations) and can be inspected via `profiles/profiles.json`. You can bootstrap the store with known subjects by capturing a few clean frames and letting the tracker run; subsequent sequences will reuse the saved IDs whenever cosine similarity stays above the threshold.
+
+When the subject holds a drink-like object (YOLO classes `cup`, `wine glass`, or `bottle`), the annotation overlay prints a `cup` badge next to the profile ID so you can spot frames that include beverages; pass `--no-cups` to skip drink tracking entirely.
 
 ## Raspberry Pi 5 tips
 
