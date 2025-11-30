@@ -74,6 +74,17 @@ class ProfileStore:
     def profiles(self) -> List[Profile]:
         return list(self._profiles.values())
 
+    def get_profile(self, profile_id: str) -> Optional[Profile]:
+        return self._profiles.get(profile_id)
+
+    def delete_profile(self, profile_id: str) -> bool:
+        """Remove a profile by ID if it exists."""
+        if profile_id not in self._profiles:
+            return False
+        del self._profiles[profile_id]
+        self.save()
+        return True
+
     def _cosine_similarity(
         self, embedding_a: np.ndarray, embedding_b: np.ndarray
     ) -> float:

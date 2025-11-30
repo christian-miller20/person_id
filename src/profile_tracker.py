@@ -36,6 +36,9 @@ class ProfileTracker:
         match_threshold: float = 0.55,
         profile_window: int = 5,
         enable_cup_detection: bool = True,
+        force_profile_id: Optional[str] = None,
+        warmup_threshold: Optional[float] = None,
+        warmup_frames: int = 0,
     ) -> None:
         self.model = YOLO(model_name)
         self.extractor = FeatureExtractor(device=device, encoder=encoder)
@@ -45,9 +48,12 @@ class ProfileTracker:
         self.drink_labels = {"cup", "wine glass", "bottle"}
         self.cup_iou_threshold = 0.15
         self.enable_cup_detection = enable_cup_detection
+        self.force_profile_id = force_profile_id
+        self.warmup_threshold = warmup_threshold
+        self.warmup_frames = max(0, warmup_frames)
 
     def _process_boxes(
-        self, frame: np.ndarray, results
+        self, frame: np.ndarray, results, threshold: float
     ) -> Tuple[List[TrackEvent], List[Tuple[int, int, int, int]]]:
         boxes = results.boxes
         events: List[TrackEvent] = []
@@ -77,13 +83,23 @@ class ProfileTracker:
             if crop.size == 0:
                 continue
             embedding = self.extractor(crop)
-            match = self.store.find_match(embedding, threshold=self.match_threshold)
-            if match is None:
-                profile_id = self.store.register_embedding(embedding)
-                match_score = 1.0
-            else:
-                profile_id, match_score = match
+            if self.force_profile_id:
+                profile_id = self.force_profile_id
+                profile = self.store.get_profile(profile_id)
+                if profile is not None:
+                    reference = np.asarray(profile.embedding, dtype=np.float32)
+                    match_score = self.store._cosine_similarity(reference, embedding)
+                else:
+                    match_score = 1.0
                 self.store.register_embedding(embedding, profile_id=profile_id)
+            else:
+                match = self.store.find_match(embedding, threshold=threshold)
+                if match is None:
+                    profile_id = self.store.register_embedding(embedding)
+                    match_score = 1.0
+                else:
+                    profile_id, match_score = match
+                    self.store.register_embedding(embedding, profile_id=profile_id)
             events.append(
                 TrackEvent(
                     frame_idx=-1,  # Patched in by caller
@@ -173,7 +189,13 @@ class ProfileTracker:
             if not ret:
                 break
             model_results = self.model(frame, verbose=False)[0]
-            events, cup_boxes = self._process_boxes(frame, model_results)
+            threshold = self.match_threshold
+            if (
+                self.warmup_threshold is not None
+                and frame_counter < self.warmup_frames
+            ):
+                threshold = self.warmup_threshold
+            events, cup_boxes = self._process_boxes(frame, model_results, threshold)
             self._assign_cups(events, cup_boxes)
             for event in events:
                 event.frame_idx = frame_counter

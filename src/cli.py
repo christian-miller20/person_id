@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 import typer
 
 from .profile_tracker import ProfileTracker
+from .profile_store import ProfileStore
 
 app = typer.Typer(add_completion=False, help="Profile-aware YOLO pipeline.")
 
@@ -39,9 +40,24 @@ def process(
         None, "--limit-frames", help="Stop after N frames for quick checks."
     ),
     enable_cups: bool = typer.Option(
-        True,
+        False,
         "--cups/--no-cups",
         help="Enable cup/wine glass/bottle detection and tagging.",
+    ),
+    force_profile: Optional[str] = typer.Option(
+        None,
+        "--force-profile",
+        help="Assign every detection to this profile ID (overrides matching).",
+    ),
+    warmup_threshold: Optional[float] = typer.Option(
+        None,
+        "--warmup-threshold",
+        help="Temporary cosine threshold to use during warmup frames.",
+    ),
+    warmup_frames: int = typer.Option(
+        0,
+        "--warmup-frames",
+        help="Number of initial frames to apply the warmup threshold.",
     ),
 ) -> None:
     """Run the YOLO + embedding pipeline and update the profile store."""
@@ -54,12 +70,31 @@ def process(
         match_threshold=match_threshold,
         profile_window=profile_window,
         enable_cup_detection=enable_cups,
+        force_profile_id=force_profile,
+        warmup_threshold=warmup_threshold,
+        warmup_frames=warmup_frames,
     )
     tracker.process_video(
         source=str(source),
         save_video_path=str(output) if output else None,
         limit_frames=limit_frames,
     )
+
+
+@app.command()
+def delete(
+    profile_ids: List[str] = typer.Argument(..., help="One or more profile IDs to remove."),
+    profiles_path: Path = typer.Option(
+        Path("profiles/profiles.json"), "--profiles", help="Profile store path."
+    ),
+) -> None:
+    """Delete one or more profiles from the store."""
+    store = ProfileStore(profiles_path)
+    for profile_id in profile_ids:
+        if store.delete_profile(profile_id):
+            typer.secho(f"Deleted {profile_id}", fg=typer.colors.GREEN)
+        else:
+            typer.secho(f"Profile {profile_id} not found", fg=typer.colors.YELLOW)
 
 
 def run() -> None:

@@ -5,3 +5,5 @@
 /profiles
 
 .codex.md
+
+src/__pycache__

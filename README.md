@@ -27,8 +27,16 @@ Useful options:
 - `--limit-frames 200` to stop early while iterating.
 - `--profile-window 5` averages the last N embeddings for each profile so short-term pose or clothing changes stay linked; set to `0` to revert to a simple running mean.
 - `--no-cups` disables cup/wine glass/bottle detection so only person profiles are produced.
+- `--force-profile profile_0001` to pin every detection in a run to a specific ID (useful for bootstrapping looks under new lighting).
+- `--warmup-threshold 0.35 --warmup-frames 90` temporarily lowers the similarity bar for the first N frames so new appearances can join an existing profile before returning to the stricter default.
 
 Profiles are stored as averaged embeddings (by default the mean of the last 5 observations) and can be inspected via `profiles/profiles.json`. You can bootstrap the store with known subjects by capturing a few clean frames and letting the tracker run; subsequent sequences will reuse the saved IDs whenever cosine similarity stays above the threshold.
+
+Remove stale or incorrect profiles:
+
+```bash
+python -m src.cli delete profile_0002 profile_0003 --profiles profiles/profiles.json
+```
 
 When the subject holds a drink-like object (YOLO classes `cup`, `wine glass`, or `bottle`), the annotation overlay prints a `cup` badge next to the profile ID so you can spot frames that include beverages; pass `--no-cups` to skip drink tracking entirely.
 
