@@ -14,21 +14,27 @@ Download a YOLO checkpoint (e.g. `yolov8n.pt`) and place it in the project root 
 
 ## Usage
 
-Process a video while creating/updating person profiles:
+Process a short “consumption event” clip and increment the dominant profile’s beer counter once (annotated output defaults to `runs/annotated_consume_<input_file_name>`):
 
 ```bash
-python -m src.cli process data/example.mp4 --model yolov8n.pt --output runs/annotated.mp4
+python -m src.cli consume data/example.mp4 --model yolov8n.pt --output runs/annotated_consume.mp4
 ```
 
 Useful options:
 - `--device cuda:0` to use a GPU if available.
 - `--encoder mobilenet_v3_small` keeps embeddings lightweight for edge devices; switch to `resnet18` if you need sharper identities.
+- `--encoder reid_torchscript --reid-model path/to/model.ts` to use a TorchScript person ReID encoder for better cross-video matching.
 - `--match-threshold 0.6` to demand higher similarity before reusing a profile.
+- `--keep-threshold 0.45` to require less similarity to *keep* the current track’s ID than to assign a new one (improves stability under motion blur).
+- `--no-temporal` to disable IoU-based temporal association across frames (enabled by default).
+- `--track-iou-threshold 0.3` to tune how strictly detections must overlap to be considered the same track.
+- `--track-max-age 10` to keep a track alive across brief occlusions (in frames).
 - `--limit-frames 200` to stop early while iterating.
 - `--profile-window 5` averages the last N embeddings for each profile so short-term pose or clothing changes stay linked; set to `0` to revert to a simple running mean.
-- `--no-cups` disables cup/wine glass/bottle detection so only person profiles are produced.
+- `--no-drinks` disables bottle/cup/wine glass detection so no beer is counted.
 - `--force-profile profile_0001` to pin every detection in a run to a specific ID (useful for bootstrapping looks under new lighting).
-- `--warmup-threshold 0.35 --warmup-frames 90` temporarily lowers the similarity bar for the first N frames so new appearances can join an existing profile before returning to the stricter default.
+- `--warmup-threshold 0.35 --warmup-frames 90` temporarily lowers the similarity bar for the first N frames so new appearances can join an existing profile before returning to the stricter default (disabled by default).
+- `--ema-alpha 0.2` sets how quickly the long-term exponential moving average adapts (set `--ema-alpha 0` to disable).
 
 Profiles are stored as averaged embeddings (by default the mean of the last 5 observations) and can be inspected via `profiles/profiles.json`. You can bootstrap the store with known subjects by capturing a few clean frames and letting the tracker run; subsequent sequences will reuse the saved IDs whenever cosine similarity stays above the threshold.
 
