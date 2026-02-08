@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -10,18 +10,6 @@ import numpy as np
 from .face_embedder import FaceEmbedder
 from .face_types import FaceEmbedding, IdentityDecision, TrackletEmbedding
 from .identity_engine import IdentityEngine
-
-
-@dataclass
-class ClipResult:
-    decision_user_id: Optional[str]
-    decision_score: float
-    decision_margin: float
-    accepted: bool
-    reason: str
-    n_used: int
-    dispersion: float
-
 
 @dataclass
 class ActiveTrack:
@@ -51,6 +39,15 @@ class FacePipeline:
         self.track_max_age = track_max_age
 
     @staticmethod
+    def _emit(verbose: bool, log_fn: Optional[Callable[[str], None]], message: str) -> None:
+        if not verbose:
+            return
+        if log_fn is not None:
+            log_fn(message)
+            return
+        print(message)
+
+    @staticmethod
     def _iou(box_a: Tuple[int, int, int, int], box_b: Tuple[int, int, int, int]) -> float:
         ax1, ay1, ax2, ay2 = box_a
         bx1, by1, bx2, by2 = box_b
@@ -70,17 +67,20 @@ class FacePipeline:
             return 0.0
         return inter_area / union
 
-    def _prune_tracks(self, tracks: Dict[int, ActiveTrack], frame_idx: int) -> None:
+    def _prune_tracks(self, tracks: Dict[int, ActiveTrack], frame_idx: int) -> Dict[int, ActiveTrack]:
         if self.track_max_age == 0:
+            stale_tracks = dict(tracks)
             tracks.clear()
-            return
+            return stale_tracks
         stale = [
             track_id
             for track_id, track in tracks.items()
             if frame_idx - track.last_seen > self.track_max_age
         ]
+        stale_tracks: Dict[int, ActiveTrack] = {}
         for track_id in stale:
-            del tracks[track_id]
+            stale_tracks[track_id] = tracks.pop(track_id)
+        return stale_tracks
 
     def _open_video_source(self, source: str) -> cv2.VideoCapture:
         cap = cv2.VideoCapture(source)
@@ -145,12 +145,14 @@ class FacePipeline:
         source: str,
         limit_frames: Optional[int] = None,
         verbose: bool = False,
+        log_fn: Optional[Callable[[str], None]] = None,
     ) -> Tuple[Dict[int, TrackletEmbedding], List[List[FrameTrackAnnotation]]]:
         cap = self._open_video_source(source)
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
         if limit_frames and total_frames > 0:
             total_frames = min(total_frames, limit_frames)
         tracks: Dict[int, ActiveTrack] = {}
+        finalized_tracklets: Dict[int, TrackletEmbedding] = {}
         frame_annotations: List[List[FrameTrackAnnotation]] = []
         next_track_id = 1
         frame_idx = 0
@@ -159,7 +161,11 @@ class FacePipeline:
             if not ok:
                 break
             faces = self.embedder.detect(frame)
-            self._prune_tracks(tracks, frame_idx)
+            stale_tracks = self._prune_tracks(tracks, frame_idx)
+            for stale_track_id, stale_track in stale_tracks.items():
+                finalized_tracklets[stale_track_id] = self.identity.aggregate_tracklet(
+                    stale_track.embeddings
+                )
             assignments: Dict[int, int] = {}
             used_tracks: set[int] = set()
             for face_idx, face in enumerate(faces):
@@ -177,11 +183,18 @@ class FacePipeline:
                     used_tracks.add(best_track_id)
 
             this_frame_annotations: List[FrameTrackAnnotation] = []
-            if verbose:
-                if total_frames:
-                    print(f"frame {frame_idx + 1}/{total_frames} -> faces={len(faces)}")
-                else:
-                    print(f"frame {frame_idx:06d} -> faces={len(faces)}")
+            if total_frames:
+                self._emit(
+                    verbose,
+                    log_fn,
+                    f"frame {frame_idx + 1}/{total_frames} -> faces={len(faces)}",
+                )
+            else:
+                self._emit(
+                    verbose,
+                    log_fn,
+                    f"frame {frame_idx:06d} -> faces={len(faces)}",
+                )
             for face_idx, face in enumerate(faces):
                 track_id = assignments.get(face_idx)
                 if track_id is None:
@@ -199,27 +212,31 @@ class FacePipeline:
                 this_frame_annotations.append(
                     FrameTrackAnnotation(track_id=track_id, bbox=face.bbox)
                 )
-                if verbose:
-                    print(
-                        "  track={track} quality={quality:.3f} det={det:.3f} "
-                        "size={size:.3f} blur={blur:.3f}".format(
-                            track=track_id,
-                            quality=face.quality,
-                            det=face.det_score,
-                            size=face.size_score,
-                            blur=face.blur_score,
-                        )
+                self._emit(
+                    verbose,
+                    log_fn,
+                    "  track={track} quality={quality:.3f} det={det:.3f} "
+                    "size={size:.3f} blur={blur:.3f}".format(
+                        track=track_id,
+                        quality=face.quality,
+                        det=face.det_score,
+                        size=face.size_score,
+                        blur=face.blur_score,
                     )
+                )
 
             frame_annotations.append(this_frame_annotations)
             frame_idx += 1
             if limit_frames and frame_idx >= limit_frames:
                 break
         cap.release()
+        # Finalize currently-active tracks.
         tracklets = {
             track_id: self.identity.aggregate_tracklet(track.embeddings)
             for track_id, track in tracks.items()
         }
+        # Include stale finalized tracks as well.
+        tracklets.update(finalized_tracklets)
         return tracklets, frame_annotations
 
     def write_multi_face_annotations(
@@ -260,9 +277,10 @@ class FacePipeline:
         source: str,
         limit_frames: Optional[int] = None,
         verbose: bool = False,
+        log_fn: Optional[Callable[[str], None]] = None,
     ) -> Tuple[Dict[int, TrackletEmbedding], List[List[FrameTrackAnnotation]]]:
         return self._build_tracklets_with_annotations(
-            source=source, limit_frames=limit_frames, verbose=verbose
+            source=source, limit_frames=limit_frames, verbose=verbose, log_fn=log_fn
         )
 
     def extract_primary_tracklet_from_video(
@@ -270,9 +288,10 @@ class FacePipeline:
         source: str,
         limit_frames: Optional[int] = None,
         verbose: bool = False,
+        log_fn: Optional[Callable[[str], None]] = None,
     ) -> TrackletEmbedding:
         tracklets_by_id, _ = self.extract_tracklets_with_annotations_from_video(
-            source=source, limit_frames=limit_frames, verbose=verbose
+            source=source, limit_frames=limit_frames, verbose=verbose, log_fn=log_fn
         )
         if not tracklets_by_id:
             return TrackletEmbedding(

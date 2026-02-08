@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -47,6 +48,9 @@ class IdentityStore:
     def list_users(self) -> List[str]:
         return sorted(self._users.keys())
 
+    def has_user(self, user_id: str) -> bool:
+        return user_id in self._users
+
     def get_templates(self, user_id: str) -> List[np.ndarray]:
         user = self._users.get(user_id)
         if user is None:
@@ -65,6 +69,15 @@ class IdentityStore:
         self.save()
         return True
 
+    def rename_user(self, cur_user_id: str, new_user_id: str) -> bool:
+        if cur_user_id not in self._users or new_user_id in self._users:
+            return False
+        self._users[new_user_id] = self._users[cur_user_id]
+        self._users[new_user_id].user_id = new_user_id
+        del self._users[cur_user_id]
+        self.save()
+        return True
+
     def add_template(self, user_id: str, embedding: np.ndarray) -> None:
         if user_id not in self._users:
             self._users[user_id] = UserTemplates(user_id=user_id)
@@ -77,3 +90,25 @@ class IdentityStore:
             self._users[user_id] = UserTemplates(user_id=user_id)
         self._users[user_id].templates = [t.astype(np.float32).tolist() for t in templates]
         self.save()
+
+    def rename_user(self, current_user_id: str, new_user_id: str) -> bool:
+        if current_user_id not in self._users:
+            return False
+        if current_user_id == new_user_id:
+            return True
+        if new_user_id in self._users:
+            return False
+        record = self._users.pop(current_user_id)
+        record.user_id = new_user_id
+        self._users[new_user_id] = record
+        self.save()
+        return True
+
+    def generate_new_user_id(self) -> str:
+        pattern = re.compile(r"^user_(\d+)$")
+        max_idx = -1
+        for user_id in self._users.keys():
+            match = pattern.match(user_id)
+            if match:
+                max_idx = max(max_idx, int(match.group(1)))
+        return f"user_{max_idx + 1:04d}"

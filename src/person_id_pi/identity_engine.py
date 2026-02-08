@@ -157,8 +157,26 @@ class IdentityEngine:
         if decision.score < min_score or decision.margin < min_margin:
             return False
         return True
+    
+    def auto_enroll_block_reason(self, decision: IdentityDecision, tracklet: TrackletEmbedding) -> Optional[str]:
+        """Returns None if auto-enroll is allowed, otherwise a short rejection reason."""
+        if decision.accepted:
+            return "already_accepted"
+        if tracklet.n_used < self.config.n_min:
+            return "insufficient_samples"
+        if tracklet.dispersion > self.config.dispersion_max:
+            return "high_dispersion"
+        min_score = max(0.0, self.config.accept_threshold - 0.1)
+        if decision.score >= min_score:
+            return "score_too_high_for_auto_enroll"
+        return None
+
+    def should_auto_enroll(self, decision: IdentityDecision, tracklet: TrackletEmbedding) -> bool:
+        return self.auto_enroll_block_reason(decision, tracklet) is None
 
     def update_templates(self, user_id: str, tracklet: TrackletEmbedding) -> bool:
+        if tracklet.n_used < self.config.n_min:
+            return False
         existing = self.store.get_templates(user_id)
         # Only add if the new template increases diversity.
         if existing:
