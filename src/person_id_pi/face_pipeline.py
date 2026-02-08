@@ -11,6 +11,7 @@ from .face_embedder import FaceEmbedder
 from .face_types import FaceEmbedding, IdentityDecision, TrackletEmbedding
 from .identity_engine import IdentityEngine
 
+
 @dataclass
 class ActiveTrack:
     track_id: int
@@ -39,7 +40,9 @@ class FacePipeline:
         self.track_max_age = track_max_age
 
     @staticmethod
-    def _emit(verbose: bool, log_fn: Optional[Callable[[str], None]], message: str) -> None:
+    def _emit(
+        verbose: bool, log_fn: Optional[Callable[[str], None]], message: str
+    ) -> None:
         if not verbose:
             return
         if log_fn is not None:
@@ -48,7 +51,9 @@ class FacePipeline:
         print(message)
 
     @staticmethod
-    def _iou(box_a: Tuple[int, int, int, int], box_b: Tuple[int, int, int, int]) -> float:
+    def _iou(
+        box_a: Tuple[int, int, int, int], box_b: Tuple[int, int, int, int]
+    ) -> float:
         ax1, ay1, ax2, ay2 = box_a
         bx1, by1, bx2, by2 = box_b
         inter_x1 = max(ax1, bx1)
@@ -67,7 +72,9 @@ class FacePipeline:
             return 0.0
         return inter_area / union
 
-    def _prune_tracks(self, tracks: Dict[int, ActiveTrack], frame_idx: int) -> Dict[int, ActiveTrack]:
+    def _prune_tracks(
+        self, tracks: Dict[int, ActiveTrack], frame_idx: int
+    ) -> Dict[int, ActiveTrack]:
         if self.track_max_age == 0:
             stale_tracks = dict(tracks)
             tracks.clear()
@@ -222,7 +229,7 @@ class FacePipeline:
                         det=face.det_score,
                         size=face.size_score,
                         blur=face.blur_score,
-                    )
+                    ),
                 )
 
             frame_annotations.append(this_frame_annotations)
@@ -259,12 +266,18 @@ class FacePipeline:
             ok, frame = cap.read()
             if not ok:
                 break
-            annotations = frame_annotations[frame_idx] if frame_idx < len(frame_annotations) else []
+            annotations = (
+                frame_annotations[frame_idx]
+                if frame_idx < len(frame_annotations)
+                else []
+            )
             for item in annotations:
                 decision = decisions.get(item.track_id)
                 accepted = bool(decision and decision.accepted and decision.user_id)
                 label = decision.user_id if accepted and decision else "unknown"
-                self._draw_box_with_label(frame, item.bbox, str(label), accepted=accepted)
+                self._draw_box_with_label(
+                    frame, item.bbox, str(label), accepted=accepted
+                )
             writer.write(frame)
             frame_idx += 1
             if frame_idx >= len(frame_annotations):

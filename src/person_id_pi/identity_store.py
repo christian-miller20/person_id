@@ -88,7 +88,9 @@ class IdentityStore:
     def replace_templates(self, user_id: str, templates: List[np.ndarray]) -> None:
         if user_id not in self._users:
             self._users[user_id] = UserTemplates(user_id=user_id)
-        self._users[user_id].templates = [t.astype(np.float32).tolist() for t in templates]
+        self._users[user_id].templates = [
+            t.astype(np.float32).tolist() for t in templates
+        ]
         self.save()
 
     def rename_user(self, current_user_id: str, new_user_id: str) -> bool:

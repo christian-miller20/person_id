@@ -46,7 +46,9 @@ def identify(
         True, "--verbose/--quiet", help="Print per-frame processing updates."
     ),
     update_templates: bool = typer.Option(
-        False, "--update-templates/--no-update-templates", help="Update templates on high-confidence matches."
+        False,
+        "--update-templates/--no-update-templates",
+        help="Update templates on high-confidence matches.",
     ),
     annotate_output: Optional[Path] = typer.Option(
         None,
@@ -80,11 +82,13 @@ def identify(
         )
 
     try:
-        tracklets_by_id, frame_annotations = pipeline.extract_tracklets_with_annotations_from_video(
-            source=source,
-            limit_frames=limit_frames,
-            verbose=verbose,
-            log_fn=log_fn,
+        tracklets_by_id, frame_annotations = (
+            pipeline.extract_tracklets_with_annotations_from_video(
+                source=source,
+                limit_frames=limit_frames,
+                verbose=verbose,
+                log_fn=log_fn,
+            )
         )
         decisions_by_track = {}
         for track_id in sorted(tracklets_by_id.keys()):
@@ -92,7 +96,11 @@ def identify(
             decision = identity.match(tracklet)
             auto_enroll_status: Optional[str] = None
             # if match, update embedding for user if update_templates is enabled
-            if update_templates and decision.user_id and identity.should_update_templates(decision, tracklet):
+            if (
+                update_templates
+                and decision.user_id
+                and identity.should_update_templates(decision, tracklet)
+            ):
                 identity.update_templates(decision.user_id, tracklet)
             # if not a match and auto_enroll_unknown is enabled, create new user and enroll
             if auto_enroll_unknown:
@@ -137,6 +145,7 @@ def identify(
     finally:
         if verbose:
             log_handle.close()
+
 
 @app.command()
 def enroll(
@@ -200,6 +209,7 @@ def delete_user(
     else:
         typer.secho(f"User {user_id} not found", fg=typer.colors.YELLOW)
 
+
 @app.command()
 def rename_user(
     cur_user_id: str = typer.Argument(..., help="Current user ID to rename."),
@@ -217,13 +227,16 @@ def rename_user(
         return
     renamed = store.rename_user(cur_user_id, new_user_id)
     if not renamed:
-        typer.secho(f"Unable to rename {cur_user_id} to {new_user_id}", fg=typer.colors.YELLOW)
+        typer.secho(
+            f"Unable to rename {cur_user_id} to {new_user_id}", fg=typer.colors.YELLOW
+        )
         return
     typer.secho(f"Renamed {cur_user_id} to {new_user_id}", fg=typer.colors.GREEN)
 
 
 def run() -> None:
     app()
+
 
 if __name__ == "__main__":
     run()

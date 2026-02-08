@@ -47,11 +47,15 @@ def _dispersion(embeddings: List[np.ndarray], reference: np.ndarray) -> float:
 
 
 class IdentityEngine:
-    def __init__(self, store: IdentityStore, config: Optional[IdentityConfig] = None) -> None:
+    def __init__(
+        self, store: IdentityStore, config: Optional[IdentityConfig] = None
+    ) -> None:
         self.store = store
         self.config = config or IdentityConfig()
 
-    def aggregate_tracklet(self, embeddings: Iterable[FaceEmbedding]) -> TrackletEmbedding:
+    def aggregate_tracklet(
+        self, embeddings: Iterable[FaceEmbedding]
+    ) -> TrackletEmbedding:
         # Filter by detector confidence before aggregation.
         filtered = [
             _normalize(item.embedding)
@@ -144,7 +148,9 @@ class IdentityEngine:
             reason=reason,
         )
 
-    def should_update_templates(self, decision: IdentityDecision, tracklet: TrackletEmbedding) -> bool:
+    def should_update_templates(
+        self, decision: IdentityDecision, tracklet: TrackletEmbedding
+    ) -> bool:
         """Stricter gate for template updates to avoid drift."""
         if not decision.accepted:
             return False
@@ -157,8 +163,10 @@ class IdentityEngine:
         if decision.score < min_score or decision.margin < min_margin:
             return False
         return True
-    
-    def auto_enroll_block_reason(self, decision: IdentityDecision, tracklet: TrackletEmbedding) -> Optional[str]:
+
+    def auto_enroll_block_reason(
+        self, decision: IdentityDecision, tracklet: TrackletEmbedding
+    ) -> Optional[str]:
         """Returns None if auto-enroll is allowed, otherwise a short rejection reason."""
         if decision.accepted:
             return "already_accepted"
@@ -171,7 +179,9 @@ class IdentityEngine:
             return "score_too_high_for_auto_enroll"
         return None
 
-    def should_auto_enroll(self, decision: IdentityDecision, tracklet: TrackletEmbedding) -> bool:
+    def should_auto_enroll(
+        self, decision: IdentityDecision, tracklet: TrackletEmbedding
+    ) -> bool:
         return self.auto_enroll_block_reason(decision, tracklet) is None
 
     def update_templates(self, user_id: str, tracklet: TrackletEmbedding) -> bool:
@@ -190,7 +200,9 @@ class IdentityEngine:
         self.store.replace_templates(user_id, updated)
         return True
 
-    def _prune_templates(self, templates: List[np.ndarray], max_count: int) -> List[np.ndarray]:
+    def _prune_templates(
+        self, templates: List[np.ndarray], max_count: int
+    ) -> List[np.ndarray]:
         if len(templates) <= max_count:
             return templates
         kept: List[np.ndarray] = [templates[0]]

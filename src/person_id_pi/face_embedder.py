@@ -91,7 +91,9 @@ class FaceEmbedder:
     def embed(self, face: FaceDetection) -> FaceEmbedding:
         # InsightFace returns the embedding on the detected face object.
         if face.embedding is None:
-            raise RuntimeError("No embedding found on detection. Ensure InsightFace is configured.")
+            raise RuntimeError(
+                "No embedding found on detection. Ensure InsightFace is configured."
+            )
         embedding = np.asarray(face.embedding, dtype=np.float32)
         return FaceEmbedding(
             embedding=embedding,
