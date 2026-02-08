@@ -40,6 +40,7 @@ python -m person_id_pi.cli enroll alice data/clip.mp4 --store profiles/face_temp
 python -m person_id_pi.cli identify data/clip.mp4 --store profiles/face_templates.json --verbose --update-templates
 python -m person_id_pi.cli identify data/clip.mp4 --store profiles/face_templates.json --verbose --auto-enroll-unknown
 python -m person_id_pi.cli identify data/clip.mp4 --store profiles/face_templates.json --annotate-output runs/annotated.mp4
+python -m person_id_pi.cli rename-user user_0002 bob --store profiles/face_templates.json
 ```
 
 ## How It Works (Minimal)
@@ -53,6 +54,7 @@ python -m person_id_pi.cli identify data/clip.mp4 --store profiles/face_template
 
 - Quality is now a composite: `det_score * size_score * blur_score` (see verbose logs).
 - `identify` uses multi-face tracking by default (IoU-based tracker across frames).
+- Tracks that age out (`track_max_age`) are finalized and included in end-of-run decisions.
 - If `--annotate-output` is omitted, output defaults to `runs/<video_name>_annotated.mp4`.
 - With `--verbose`, frame logs are written to `logs/<video_name>.log`; add `--tee-logs` to also mirror them to stdout.
 - Use `--annotate-output path/to/out.mp4` to override annotated output location.
@@ -70,14 +72,22 @@ python -m person_id_pi.cli identify data/clip.mp4 --store profiles/face_template
 - `n_used`: Number of embeddings kept after quality filtering and outlier rejection.
 - `dispersion`: Consistency of the tracklet embeddings (lower is more stable).
 - `reason`: Decision reason, such as `accepted`, `below_threshold`, `insufficient_samples`, `high_dispersion`, or `auto_enrolled_unknown`.
+- `auto_enroll` (shown when `--auto-enroll-unknown` is enabled): per-track enrollment outcome, e.g. `enrolled` or `rejected:<reason>`.
 
 Verbose frame logs (`--verbose`) include:
 
 - `faces`: Number of detected faces in that frame.
 - `quality`: Composite quality used for filtering (`det_score * size_score * blur_score`).
 - `det`: Raw detector confidence. E.g. Do I see a face?
-- `size`: Normalized face-size score. how well is face in frame?
+- `size`: Normalized face-size score. How large is the detected face in frame?
 - `blur`: Normalized sharpness score from Laplacian variance. Is face readable?
+
+`size` formula in this repo:
+
+- `face_size_px = min(face_width_px, face_height_px)`
+- `size = min(1.0, face_size_px / 160)`
+
+Important: `size` reflects face pixel size, not centering/framing quality by itself.
 
 ### Good Value Guidelines
 
