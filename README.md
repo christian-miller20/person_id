@@ -38,6 +38,7 @@ pip install -r requirements.txt
 ```bash
 python -m person_id_pi.cli enroll alice data/clip.mp4 --store profiles/face_templates.json --verbose
 python -m person_id_pi.cli identify data/clip.mp4 --store profiles/face_templates.json --verbose --update-templates
+python -m person_id_pi.cli identify data/clip.mp4 --store profiles/face_templates.json --verbose --multi-face
 ```
 
 ## How It Works (Minimal)
@@ -50,5 +51,6 @@ python -m person_id_pi.cli identify data/clip.mp4 --store profiles/face_template
 ## Notes
 
 - Quality is now a composite: `det_score * size_score * blur_score` (see verbose logs).
-- Multi-person tracking is not implemented yet; the pipeline chooses the highest-confidence face each frame.
+- Default behavior is single-person mode (highest-confidence face per frame).
+- Use `--multi-face` to enable a simple IoU-based tracker across frames.
 - The identity engine + template store are implemented and testable today.

@@ -35,38 +35,65 @@ def identify(
     update_templates: bool = typer.Option(
         False, "--update-templates/--no-update-templates", help="Update templates on high-confidence matches."
     ),
+    multi_face: bool = typer.Option(
+        False, "--multi-face/--single-face", help="Process and identify multiple faces in a clip."
+    ),
 ) -> None:
     identity = _build_identity(store_path)
     pipeline = FacePipeline(embedder=FaceEmbedder(), identity=identity)
-    tracklet = pipeline.extract_tracklet_from_video(
-        source=source, limit_frames=limit_frames, verbose=verbose
-    )
-    decision = identity.match(tracklet)
-    if update_templates and decision.user_id and identity.should_update_templates(decision, tracklet):
-        identity.update_templates(decision.user_id, tracklet)
-    result = ClipResult(
-        decision_user_id=decision.user_id,
-        decision_score=decision.score,
-        decision_margin=decision.margin,
-        accepted=decision.accepted,
-        reason=decision.reason,
-        n_used=tracklet.n_used,
-        dispersion=tracklet.dispersion,
-    )
-    typer.secho(
-        " ".join(
-            [
-                f"accepted={result.accepted}",
-                f"user_id={result.decision_user_id}",
-                f"score={result.decision_score:.3f}",
-                f"margin={result.decision_margin:.3f}",
-                f"n_used={result.n_used}",
-                f"dispersion={result.dispersion:.3f}",
-                f"reason={result.reason}",
-            ]
-        ),
-        fg=typer.colors.CYAN,
-    )
+    if multi_face:
+        tracklets = pipeline.extract_tracklets_from_video(
+            source=source, limit_frames=limit_frames, verbose=verbose
+        )
+        for idx, tracklet in enumerate(tracklets, start=1):
+            decision = identity.match(tracklet)
+            if update_templates and decision.user_id and identity.should_update_templates(decision, tracklet):
+                identity.update_templates(decision.user_id, tracklet)
+            typer.secho(
+                " ".join(
+                    [
+                        f"track={idx}",
+                        f"accepted={decision.accepted}",
+                        f"user_id={decision.user_id}",
+                        f"score={decision.score:.3f}",
+                        f"margin={decision.margin:.3f}",
+                        f"n_used={tracklet.n_used}",
+                        f"dispersion={tracklet.dispersion:.3f}",
+                        f"reason={decision.reason}",
+                    ]
+                ),
+                fg=typer.colors.CYAN,
+            )
+    else:
+        tracklet = pipeline.extract_tracklet_from_video(
+            source=source, limit_frames=limit_frames, verbose=verbose
+        )
+        decision = identity.match(tracklet)
+        if update_templates and decision.user_id and identity.should_update_templates(decision, tracklet):
+            identity.update_templates(decision.user_id, tracklet)
+        result = ClipResult(
+            decision_user_id=decision.user_id,
+            decision_score=decision.score,
+            decision_margin=decision.margin,
+            accepted=decision.accepted,
+            reason=decision.reason,
+            n_used=tracklet.n_used,
+            dispersion=tracklet.dispersion,
+        )
+        typer.secho(
+            " ".join(
+                [
+                    f"accepted={result.accepted}",
+                    f"user_id={result.decision_user_id}",
+                    f"score={result.decision_score:.3f}",
+                    f"margin={result.decision_margin:.3f}",
+                    f"n_used={result.n_used}",
+                    f"dispersion={result.dispersion:.3f}",
+                    f"reason={result.reason}",
+                ]
+            ),
+            fg=typer.colors.CYAN,
+        )
 
 
 @app.command()

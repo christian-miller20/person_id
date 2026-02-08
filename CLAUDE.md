@@ -44,3 +44,4 @@ pytest -q
 - Quality in logs is composite: `det_score * size_score * blur_score`.
 - Aggregation: median anchor -> outlier reject -> mean of inliers.
 - Matching uses max cosine similarity per user + margin to the second best.
+- `identify --multi-face` uses a simple IoU-based tracker to aggregate per-person tracklets.
