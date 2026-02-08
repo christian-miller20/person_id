@@ -47,7 +47,17 @@ class FacePipeline:
                     print(f"frame {idx:06d} -> faces=0")
                 continue
             if verbose:
-                print(f"frame {idx:06d} -> faces={len(faces)} quality={face.quality:.3f}")
+                print(
+                    "frame {frame} -> faces={faces} quality={quality:.3f} det={det:.3f} "
+                    "size={size:.3f} blur={blur:.3f}".format(
+                        frame=f"{idx:06d}",
+                        faces=len(faces),
+                        quality=face.quality,
+                        det=face.det_score,
+                        size=face.size_score,
+                        blur=face.blur_score,
+                    )
+                )
             embeddings.append(self.embedder.embed(face))
         return embeddings
 
@@ -95,12 +105,28 @@ class FacePipeline:
                 if verbose:
                     if total_frames:
                         print(
-                            f"frame {count + 1}/{total_frames} -> faces={len(faces)} "
-                            f"quality={face.quality:.3f}"
+                            "frame {frame}/{total} -> faces={faces} quality={quality:.3f} "
+                            "det={det:.3f} size={size:.3f} blur={blur:.3f}".format(
+                                frame=count + 1,
+                                total=total_frames,
+                                faces=len(faces),
+                                quality=face.quality,
+                                det=face.det_score,
+                                size=face.size_score,
+                                blur=face.blur_score,
+                            )
                         )
                     else:
                         print(
-                            f"frame {count:06d} -> faces={len(faces)} quality={face.quality:.3f}"
+                            "frame {frame} -> faces={faces} quality={quality:.3f} "
+                            "det={det:.3f} size={size:.3f} blur={blur:.3f}".format(
+                                frame=f"{count:06d}",
+                                faces=len(faces),
+                                quality=face.quality,
+                                det=face.det_score,
+                                size=face.size_score,
+                                blur=face.blur_score,
+                            )
                         )
                 embeddings.append(self.embedder.embed(face))
             count += 1

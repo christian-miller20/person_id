@@ -41,6 +41,6 @@ pytest -q
 - `src/person_id_pi/cli.py`: `enroll`, `identify`, `list-users`, `delete-user`.
 
 ## Notes
-- Quality in logs is InsightFace detector confidence (`det_score`).
+- Quality in logs is composite: `det_score * size_score * blur_score`.
 - Aggregation: median anchor -> outlier reject -> mean of inliers.
 - Matching uses max cosine similarity per user + margin to the second best.

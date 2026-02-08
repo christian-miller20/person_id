@@ -6,7 +6,7 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class IdentityConfig:
     # Quality thresholds
-    quality_min: float = 0.5
+    quality_min: float = 0.2
 
     # Aggregation thresholds
     outlier_threshold: float = 0.35  # minimum cosine similarity to the median embedding

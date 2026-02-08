@@ -12,8 +12,14 @@ class FaceDetection:
     bbox: Tuple[int, int, int, int]
     # Optional 2D facial landmarks (e.g., 5-point) in image coordinates.
     landmarks: Optional[List[Tuple[float, float]]]
-    # Detector confidence score used as a lightweight "quality" signal.
+    # Final quality score used for filtering (combined metrics).
     quality: float
+    # Raw detector confidence from InsightFace.
+    det_score: float
+    # Normalized size score based on face bbox size.
+    size_score: float
+    # Normalized blur score based on Laplacian variance.
+    blur_score: float
     # Aligned or raw face crop used for embedding (BGR image array).
     aligned_crop: np.ndarray
     # Optional 512-d embedding attached by the detector (InsightFace provides this).
@@ -24,7 +30,7 @@ class FaceDetection:
 class FaceEmbedding:
     # L2-normalized 512-d face embedding vector.
     embedding: np.ndarray  # shape (512,)
-    # Quality score inherited from the detector.
+    # Quality score inherited from the detector (combined metrics).
     quality: float
     # Bounding box of the face used for this embedding.
     bbox: Tuple[int, int, int, int]

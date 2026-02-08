@@ -49,6 +49,6 @@ python -m person_id_pi.cli identify data/clip.mp4 --store profiles/face_template
 
 ## Notes
 
-- Quality is the detector confidence (`det_score`) from InsightFace, not a true blur/pose metric.
+- Quality is now a composite: `det_score * size_score * blur_score` (see verbose logs).
 - Multi-person tracking is not implemented yet; the pipeline chooses the highest-confidence face each frame.
 - The identity engine + template store are implemented and testable today.
