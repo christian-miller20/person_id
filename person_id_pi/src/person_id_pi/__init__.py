@@ -1,1 +1,0 @@
-"""Person ID pipeline package."""

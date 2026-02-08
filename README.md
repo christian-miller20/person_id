@@ -1,8 +1,31 @@
-# YOLO Profile Tracker
+# Person ID Pi
 
-This repository shows how to pair an Ultralytics YOLO detector with a light embedding store so a person spotted on camera can be recognized again in later frames. The pipeline uses YOLO for person detection and a pretrained CNN encoder (MobileNet V3 small by default) to build a cosine-similarity profile bank saved to `profiles/profiles.json`.
+Face-embedding + evidence-accumulation pipeline for cross-video identity.
 
-## Getting started
+**System Architecture**
+```
+Video/Frames
+   |
+   v
+[Face Detection + Alignment]
+   |   (bbox, landmarks, det_score)
+   v
+[Embedding (ArcFace)]
+   |   (512-d embedding, quality)
+   v
+[Tracklet Aggregation]
+   |   (median -> outlier reject -> mean)
+   v
+[Identity Engine]
+   |   (open-set match: score + margin + evidence)
+   v
+Identity Decision
+   |
+   v
+[Template Store] <-> update on high-confidence matches
+```
+
+## Setup
 
 ```bash
 python -m venv .venv
@@ -10,54 +33,22 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Download a YOLO checkpoint (e.g. `yolov8n.pt`) and place it in the project root or reference a custom path.
-
-## Usage
-
-Process a short “consumption event” clip and increment the dominant profile’s beer counter once (annotated output defaults to `runs/annotated_consume_<input_file_name>`):
+## CLI
 
 ```bash
-python -m src.cli consume data/example.mp4 --model yolov8n.pt --output runs/annotated_consume.mp4
+python -m person_id_pi.cli enroll alice data/clip.mp4 --store profiles/face_templates.json --verbose
+python -m person_id_pi.cli identify data/clip.mp4 --store profiles/face_templates.json --verbose --update-templates
 ```
 
-Useful options:
-- `--device cuda:0` to use a GPU if available.
-- `--encoder mobilenet_v3_small` keeps embeddings lightweight for edge devices; switch to `resnet18` if you need sharper identities.
-- `--encoder reid_torchscript --reid-model path/to/model.ts` to use a TorchScript person ReID encoder for better cross-video matching.
-- `--match-threshold 0.6` to demand higher similarity before reusing a profile.
-- `--keep-threshold 0.45` to require less similarity to *keep* the current track’s ID than to assign a new one (improves stability under motion blur).
-- `--no-temporal` to disable IoU-based temporal association across frames (enabled by default).
-- `--track-iou-threshold 0.3` to tune how strictly detections must overlap to be considered the same track.
-- `--track-max-age 10` to keep a track alive across brief occlusions (in frames).
-- `--limit-frames 200` to stop early while iterating.
-- `--profile-window 5` averages the last N embeddings for each profile so short-term pose or clothing changes stay linked; set to `0` to revert to a simple running mean.
-- `--no-drinks` disables bottle/cup/wine glass detection so no beer is counted.
-- `--force-profile profile_0001` to pin every detection in a run to a specific ID (useful for bootstrapping looks under new lighting).
-- `--warmup-threshold 0.35 --warmup-frames 90` temporarily lowers the similarity bar for the first N frames so new appearances can join an existing profile before returning to the stricter default (disabled by default).
-- `--ema-alpha 0.2` sets how quickly the long-term exponential moving average adapts (set `--ema-alpha 0` to disable).
+## How It Works (Minimal)
 
-Profiles are stored as averaged embeddings (by default the mean of the last 5 observations) and can be inspected via `profiles/profiles.json`. You can bootstrap the store with known subjects by capturing a few clean frames and letting the tracker run; subsequent sequences will reuse the saved IDs whenever cosine similarity stays above the threshold.
+- **FaceEmbedder** uses InsightFace to detect faces and return embeddings.
+- **IdentityEngine** aggregates embeddings within a clip into a stable tracklet embedding.
+- **IdentityEngine** performs open-set matching (score + margin + evidence thresholds).
+- **IdentityStore** persists per-user templates in `profiles/face_templates.json`.
 
-Remove stale or incorrect profiles:
+## Notes
 
-```bash
-python -m src.cli delete profile_0002 profile_0003 --profiles profiles/profiles.json
-```
-
-When the subject holds a drink-like object (YOLO classes `cup`, `wine glass`, or `bottle`), the annotation overlay prints a `cup` badge next to the profile ID so you can spot frames that include beverages; pass `--no-cups` to skip drink tracking entirely.
-
-## Raspberry Pi 5 tips
-
-- Follow the [Ultralytics Raspberry Pi guide](https://docs.ultralytics.com/guides/raspberry-pi/#install-ultralytics-package) when provisioning the board: enable a 4 GB swapfile, run `sudo apt update && sudo apt upgrade`, and install the system deps (`sudo apt install python3-pip python3-venv libopenblas-dev libjpeg-dev libfreetype6-dev`).
-- Create an isolated environment and install Ultralytics plus this project inside it:
-  ```bash
-  python3 -m venv .venv
-  source .venv/bin/activate
-  pip install --upgrade pip wheel
-  pip install ultralytics
-  pip install -r requirements.txt
-  ```
-- Prefer the nano YOLO checkpoints (`yolov8n.pt`) and keep `--device cpu` unless you add a Coral TPU or similar accelerator.
-- Use the default `mobilenet_v3_small` encoder; it reduces inference time by ~3× versus ResNet18 on ARM.
-- Build OpenCV with SIMD (NEON) enabled (or install `opencv-python-headless`) and launch with `export OMP_NUM_THREADS=2` to stay within thermal limits.
-- For real-time streams, set `--limit-frames` during debugging and lower `--conf` to ~0.3 so YOLO skips fewer detections per pass.
+- Quality is the detector confidence (`det_score`) from InsightFace, not a true blur/pose metric.
+- Multi-person tracking is not implemented yet; the pipeline chooses the highest-confidence face each frame.
+- The identity engine + template store are implemented and testable today.

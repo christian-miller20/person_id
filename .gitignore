@@ -1,9 +1,38 @@
-/runs
-
 /data
-
-/profiles
 
 .codex.md
 
-src/__pycache__
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+.build/
+.dist/
+.eggs/
+.venv/
+.env/
+*.env
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+
+# App data/artifacts
+profiles/face_templates.json
+models/
+outputs/
+logs/
+tmp/
+
+# InsightFace cache
+.insightface/
