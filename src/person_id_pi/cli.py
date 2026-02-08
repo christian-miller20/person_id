@@ -38,21 +38,29 @@ def identify(
     multi_face: bool = typer.Option(
         False, "--multi-face/--single-face", help="Process and identify multiple faces in a clip."
     ),
+    annotate_output: Optional[Path] = typer.Option(
+        None,
+        "--annotate-output",
+        help="Write annotated output video with bounding boxes and identified user IDs.",
+    ),
 ) -> None:
     identity = _build_identity(store_path)
     pipeline = FacePipeline(embedder=FaceEmbedder(), identity=identity)
     if multi_face:
-        tracklets = pipeline.extract_tracklets_from_video(
+        tracklets_by_id, frame_annotations = pipeline.extract_tracklets_with_annotations_from_video(
             source=source, limit_frames=limit_frames, verbose=verbose
         )
-        for idx, tracklet in enumerate(tracklets, start=1):
+        decisions_by_track = {}
+        for track_id in sorted(tracklets_by_id.keys()):
+            tracklet = tracklets_by_id[track_id]
             decision = identity.match(tracklet)
+            decisions_by_track[track_id] = decision
             if update_templates and decision.user_id and identity.should_update_templates(decision, tracklet):
                 identity.update_templates(decision.user_id, tracklet)
             typer.secho(
                 " ".join(
                     [
-                        f"track={idx}",
+                        f"track={track_id}",
                         f"accepted={decision.accepted}",
                         f"user_id={decision.user_id}",
                         f"score={decision.score:.3f}",
@@ -64,6 +72,14 @@ def identify(
                 ),
                 fg=typer.colors.CYAN,
             )
+        if annotate_output:
+            pipeline.write_multi_face_annotations(
+                source=source,
+                output_path=annotate_output,
+                frame_annotations=frame_annotations,
+                decisions=decisions_by_track,
+            )
+            typer.secho(f"Annotated video written to {annotate_output}", fg=typer.colors.GREEN)
     else:
         tracklet = pipeline.extract_tracklet_from_video(
             source=source, limit_frames=limit_frames, verbose=verbose
@@ -94,6 +110,16 @@ def identify(
             ),
             fg=typer.colors.CYAN,
         )
+        if annotate_output:
+            label = decision.user_id if decision.accepted and decision.user_id else "unknown"
+            pipeline.write_single_face_annotations(
+                source=source,
+                output_path=annotate_output,
+                label=label,
+                accepted=decision.accepted and decision.user_id is not None,
+                limit_frames=limit_frames,
+            )
+            typer.secho(f"Annotated video written to {annotate_output}", fg=typer.colors.GREEN)
 
 
 @app.command()

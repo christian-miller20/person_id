@@ -39,6 +39,7 @@ pip install -r requirements.txt
 python -m person_id_pi.cli enroll alice data/clip.mp4 --store profiles/face_templates.json --verbose
 python -m person_id_pi.cli identify data/clip.mp4 --store profiles/face_templates.json --verbose --update-templates
 python -m person_id_pi.cli identify data/clip.mp4 --store profiles/face_templates.json --verbose --multi-face
+python -m person_id_pi.cli identify data/clip.mp4 --store profiles/face_templates.json --multi-face --annotate-output outputs/annotated.mp4
 ```
 
 ## How It Works (Minimal)
@@ -53,4 +54,5 @@ python -m person_id_pi.cli identify data/clip.mp4 --store profiles/face_template
 - Quality is now a composite: `det_score * size_score * blur_score` (see verbose logs).
 - Default behavior is single-person mode (highest-confidence face per frame).
 - Use `--multi-face` to enable a simple IoU-based tracker across frames.
+- Use `--annotate-output path/to/out.mp4` to render bounding boxes + resolved `user_id` labels.
 - The identity engine + template store are implemented and testable today.

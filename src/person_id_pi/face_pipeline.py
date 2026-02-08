@@ -8,24 +8,12 @@ import cv2
 import numpy as np
 
 from .face_embedder import FaceEmbedder
-from .face_types import FaceEmbedding, TrackletEmbedding
+from .face_types import FaceEmbedding, IdentityDecision, TrackletEmbedding
 from .identity_engine import IdentityEngine
 
 
 @dataclass
 class ClipResult:
-    decision_user_id: Optional[str]
-    decision_score: float
-    decision_margin: float
-    accepted: bool
-    reason: str
-    n_used: int
-    dispersion: float
-
-
-@dataclass
-class TrackDecision:
-    track_id: int
     decision_user_id: Optional[str]
     decision_score: float
     decision_margin: float
@@ -43,6 +31,12 @@ class ActiveTrack:
     embeddings: List[FaceEmbedding] = field(default_factory=list)
 
 
+@dataclass
+class FrameTrackAnnotation:
+    track_id: int
+    bbox: Tuple[int, int, int, int]
+
+
 class FacePipeline:
     def __init__(
         self,
@@ -55,13 +49,6 @@ class FacePipeline:
         self.identity = identity
         self.track_iou_threshold = track_iou_threshold
         self.track_max_age = track_max_age
-
-    def _select_face(self, faces: List) -> Optional:
-        if not faces:
-            return None
-        # Single-person mode: choose the best detection by confidence.
-        faces.sort(key=lambda f: f.quality, reverse=True)
-        return faces[0]
 
     @staticmethod
     def _iou(box_a: Tuple[int, int, int, int], box_b: Tuple[int, int, int, int]) -> float:
@@ -95,59 +82,76 @@ class FacePipeline:
         for track_id in stale:
             del tracks[track_id]
 
-    def _collect_embeddings_from_frames(
-        self, frames: Iterable[np.ndarray], verbose: bool = False
-    ) -> List[FaceEmbedding]:
-        embeddings: List[FaceEmbedding] = []
-        for idx, frame in enumerate(frames):
-            faces = self.embedder.detect(frame)
-            face = self._select_face(faces)
-            if face is None:
-                if verbose:
-                    print(f"frame {idx:06d} -> faces=0")
-                continue
-            if verbose:
-                print(
-                    "frame {frame} -> faces={faces} quality={quality:.3f} det={det:.3f} "
-                    "size={size:.3f} blur={blur:.3f}".format(
-                        frame=f"{idx:06d}",
-                        faces=len(faces),
-                        quality=face.quality,
-                        det=face.det_score,
-                        size=face.size_score,
-                        blur=face.blur_score,
-                    )
-                )
-            embeddings.append(self.embedder.embed(face))
-        return embeddings
+    def _open_video_source(self, source: str) -> cv2.VideoCapture:
+        cap = cv2.VideoCapture(source)
+        if not cap.isOpened():
+            raise RuntimeError(f"Unable to open video source {source}")
+        return cap
 
-    def process_frames(self, frames: Iterable[np.ndarray], verbose: bool = False) -> ClipResult:
-        embeddings = self._collect_embeddings_from_frames(frames, verbose=verbose)
-        tracklet = self.identity.aggregate_tracklet(embeddings)
-        decision = self.identity.match(tracklet)
-        return ClipResult(
-            decision_user_id=decision.user_id,
-            decision_score=decision.score,
-            decision_margin=decision.margin,
-            accepted=decision.accepted,
-            reason=decision.reason,
-            n_used=tracklet.n_used,
-            dispersion=tracklet.dispersion,
+    def _open_video_writer(
+        self,
+        output_path: Path | str,
+        fps: float,
+        width: int,
+        height: int,
+    ) -> cv2.VideoWriter:
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        # VS Code's media preview is stricter than QuickTime; prefer H.264 tags first.
+        suffix = output_path.suffix.lower()
+        if suffix == ".mp4":
+            codec_candidates = ("avc1", "H264", "mp4v")
+        elif suffix == ".avi":
+            codec_candidates = ("MJPG", "XVID")
+        else:
+            codec_candidates = ("mp4v",)
+        for codec in codec_candidates:
+            writer = cv2.VideoWriter(
+                str(output_path),
+                cv2.VideoWriter_fourcc(*codec),
+                fps,
+                (width, height),
+            )
+            if writer.isOpened():
+                return writer
+            writer.release()
+        raise RuntimeError(
+            f"Unable to open output writer for {output_path} with codecs {codec_candidates}"
         )
 
-    def extract_tracklets_from_video(
+    def _draw_box_with_label(
+        self,
+        frame: np.ndarray,
+        bbox: Tuple[int, int, int, int],
+        label: str,
+        accepted: bool,
+    ) -> None:
+        x1, y1, x2, y2 = bbox
+        color = (0, 200, 0) if accepted else (0, 140, 255)
+        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+        cv2.putText(
+            frame,
+            label,
+            (x1, max(20, y1 - 8)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            color,
+            2,
+            cv2.LINE_AA,
+        )
+
+    def _build_tracklets_with_annotations(
         self,
         source: str,
         limit_frames: Optional[int] = None,
         verbose: bool = False,
-    ) -> List[TrackletEmbedding]:
-        cap = cv2.VideoCapture(source)
-        if not cap.isOpened():
-            raise RuntimeError(f"Unable to open video source {source}")
+    ) -> Tuple[Dict[int, TrackletEmbedding], List[List[FrameTrackAnnotation]]]:
+        cap = self._open_video_source(source)
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
         if limit_frames and total_frames > 0:
             total_frames = min(total_frames, limit_frames)
         tracks: Dict[int, ActiveTrack] = {}
+        frame_annotations: List[List[FrameTrackAnnotation]] = []
         next_track_id = 1
         frame_idx = 0
         while True:
@@ -171,6 +175,8 @@ class FacePipeline:
                 if best_track_id is not None:
                     assignments[face_idx] = best_track_id
                     used_tracks.add(best_track_id)
+
+            this_frame_annotations: List[FrameTrackAnnotation] = []
             if verbose:
                 if total_frames:
                     print(f"frame {frame_idx + 1}/{total_frames} -> faces={len(faces)}")
@@ -190,6 +196,9 @@ class FacePipeline:
                 track.last_bbox = face.bbox
                 track.last_seen = frame_idx
                 track.embeddings.append(self.embedder.embed(face))
+                this_frame_annotations.append(
+                    FrameTrackAnnotation(track_id=track_id, bbox=face.bbox)
+                )
                 if verbose:
                     print(
                         "  track={track} quality={quality:.3f} det={det:.3f} "
@@ -201,91 +210,80 @@ class FacePipeline:
                             blur=face.blur_score,
                         )
                     )
+
+            frame_annotations.append(this_frame_annotations)
             frame_idx += 1
             if limit_frames and frame_idx >= limit_frames:
                 break
         cap.release()
-        tracklets: List[TrackletEmbedding] = []
-        for track in tracks.values():
-            tracklets.append(self.identity.aggregate_tracklet(track.embeddings))
-        return tracklets
+        tracklets = {
+            track_id: self.identity.aggregate_tracklet(track.embeddings)
+            for track_id, track in tracks.items()
+        }
+        return tracklets, frame_annotations
 
-    def extract_tracklet_from_video(
+    def write_multi_face_annotations(
+        self,
+        source: str,
+        output_path: Path | str,
+        frame_annotations: List[List[FrameTrackAnnotation]],
+        decisions: Dict[int, IdentityDecision],
+    ) -> None:
+        cap = self._open_video_source(source)
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        if fps <= 0:
+            fps = 30.0
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        writer = self._open_video_writer(output_path, fps, width, height)
+
+        frame_idx = 0
+        while True:
+            ok, frame = cap.read()
+            if not ok:
+                break
+            annotations = frame_annotations[frame_idx] if frame_idx < len(frame_annotations) else []
+            for item in annotations:
+                decision = decisions.get(item.track_id)
+                accepted = bool(decision and decision.accepted and decision.user_id)
+                label = decision.user_id if accepted and decision else "unknown"
+                self._draw_box_with_label(frame, item.bbox, str(label), accepted=accepted)
+            writer.write(frame)
+            frame_idx += 1
+            if frame_idx >= len(frame_annotations):
+                break
+        writer.release()
+        cap.release()
+
+    def extract_tracklets_with_annotations_from_video(
+        self,
+        source: str,
+        limit_frames: Optional[int] = None,
+        verbose: bool = False,
+    ) -> Tuple[Dict[int, TrackletEmbedding], List[List[FrameTrackAnnotation]]]:
+        return self._build_tracklets_with_annotations(
+            source=source, limit_frames=limit_frames, verbose=verbose
+        )
+
+    def extract_primary_tracklet_from_video(
         self,
         source: str,
         limit_frames: Optional[int] = None,
         verbose: bool = False,
     ) -> TrackletEmbedding:
-        cap = cv2.VideoCapture(source)
-        if not cap.isOpened():
-            raise RuntimeError(f"Unable to open video source {source}")
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
-        if limit_frames and total_frames > 0:
-            total_frames = min(total_frames, limit_frames)
-        embeddings: List[FaceEmbedding] = []
-        count = 0
-        while True:
-            ok, frame = cap.read()
-            if not ok:
-                break
-            faces = self.embedder.detect(frame)
-            face = self._select_face(faces)
-            if face is None:
-                if verbose:
-                    if total_frames:
-                        print(f"frame {count + 1}/{total_frames} -> faces=0")
-                    else:
-                        print(f"frame {count:06d} -> faces=0")
-            else:
-                if verbose:
-                    if total_frames:
-                        print(
-                            "frame {frame}/{total} -> faces={faces} quality={quality:.3f} "
-                            "det={det:.3f} size={size:.3f} blur={blur:.3f}".format(
-                                frame=count + 1,
-                                total=total_frames,
-                                faces=len(faces),
-                                quality=face.quality,
-                                det=face.det_score,
-                                size=face.size_score,
-                                blur=face.blur_score,
-                            )
-                        )
-                    else:
-                        print(
-                            "frame {frame} -> faces={faces} quality={quality:.3f} "
-                            "det={det:.3f} size={size:.3f} blur={blur:.3f}".format(
-                                frame=f"{count:06d}",
-                                faces=len(faces),
-                                quality=face.quality,
-                                det=face.det_score,
-                                size=face.size_score,
-                                blur=face.blur_score,
-                            )
-                        )
-                embeddings.append(self.embedder.embed(face))
-            count += 1
-            if limit_frames and count >= limit_frames:
-                break
-        cap.release()
-        return self.identity.aggregate_tracklet(embeddings)
-
-    def process_video(
-        self,
-        source: str,
-        limit_frames: Optional[int] = None,
-        verbose: bool = False,
-    ) -> ClipResult:
-        tracklet = self.extract_tracklet_from_video(
+        tracklets_by_id, _ = self.extract_tracklets_with_annotations_from_video(
             source=source, limit_frames=limit_frames, verbose=verbose
         )
-        decision = self.identity.match(tracklet)
-        return ClipResult(
-            decision_user_id=decision.user_id,
-            decision_score=decision.score,
-            decision_margin=decision.margin,
-            accepted=decision.accepted,
-            reason=decision.reason,
-            n_used=tracklet.n_used,
-            dispersion=tracklet.dispersion,
+        if not tracklets_by_id:
+            return TrackletEmbedding(
+                embedding=np.zeros((512,), dtype=np.float32),
+                n_used=0,
+                dispersion=0.0,
+                outliers=0,
+            )
+        ranked = sorted(
+            tracklets_by_id.values(),
+            key=lambda t: (t.n_used, -t.dispersion),
+            reverse=True,
         )
+        return ranked[0]

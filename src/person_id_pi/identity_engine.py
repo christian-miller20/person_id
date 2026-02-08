@@ -159,8 +159,6 @@ class IdentityEngine:
         return True
 
     def update_templates(self, user_id: str, tracklet: TrackletEmbedding) -> bool:
-        if tracklet.n_used < self.config.n_min:
-            return False
         existing = self.store.get_templates(user_id)
         # Only add if the new template increases diversity.
         if existing:
