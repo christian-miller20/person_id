@@ -2,6 +2,8 @@
 /runs
 /profiles
 output.txt
+/espresso_training
+/notes
 
 .codex.md
 CLAUDE.md

@@ -86,6 +86,37 @@ Distinct-event controls in the pipeline:
 - Minimum evidence gate: beverage track must be seen for multiple frames before counting.
 - Cooldown dedupe: repeated events for the same `(user_id, label)` inside a cooldown window are rejected.
 
+## Real-World Espresso Rollout
+
+Use this process before enabling espresso counting in production clips.
+
+1. Collect deployment-style data:
+   - Capture from the real camera angle/location (kegerator viewpoint).
+   - Include in-hand espresso shots, partial occlusions, and motion blur.
+   - Include hard negatives: mugs, empty hands, cans/bottles, reflections.
+2. Build reproducible train/val split:
+   - Use `scripts/build_random_classify_split.py` for initial classification data split.
+   - Keep a fixed random seed so you can compare experiments fairly.
+3. Train espresso classifier baseline:
+   - Start with `yolov8n-cls.pt`.
+   - Use `imgsz=224` first; try `imgsz=320` if small-object detail is weak.
+4. Validate on holdout:
+   - Run `yolo classify val ...` and track `top1_acc`.
+   - Ignore `top5_acc` for 2-class problems (`espresso` vs `non_espresso`).
+5. Run real-clip smoke test:
+   - Run prediction on unseen clips from your real environment.
+   - Manually inspect false positives and false negatives.
+6. Targeted data iteration:
+   - Add 100-300 examples of the exact failure modes.
+   - Retrain and compare against previous run using the same validation split.
+7. Promotion criteria (practical):
+   - Validation remains strong across retrains.
+   - Real-clip false positives are low enough for your workflow.
+   - In-hand espresso examples are consistently classified correctly.
+8. Integrate into pipeline:
+   - Keep beer detector path unchanged.
+   - Add espresso as a secondary model path and monitor logs for a few runs.
+
 ## Future Work
 
 - Implement kegerator activation triggers (door switch / motion / weight change) to capture short event clips instead of 24/7 recording.

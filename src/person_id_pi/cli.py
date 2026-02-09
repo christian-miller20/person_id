@@ -143,6 +143,26 @@ def identify_count(
         "--object-conf-min",
         help="Optional override for minimum object confidence threshold for beverage event detection.",
     ),
+    secondary_detector_model: Optional[str] = typer.Option(
+        None,
+        "--secondary-detector-model",
+        help="Optional second detector model path/name (e.g. espresso-specialized).",
+    ),
+    secondary_object_conf_min: Optional[float] = typer.Option(
+        None,
+        "--secondary-object-conf-min",
+        help="Optional confidence threshold override for secondary detector.",
+    ),
+    secondary_allowed_labels: Optional[str] = typer.Option(
+        "espresso_shot",
+        "--secondary-allowed-labels",
+        help="Comma-separated labels to allow from secondary detector.",
+    ),
+    secondary_merge_iou: float = typer.Option(
+        0.6,
+        "--secondary-merge-iou",
+        help="IoU threshold used to dedupe same-label boxes across primary/secondary detectors.",
+    ),
     association_max_dist: Optional[float] = typer.Option(
         None,
         "--association-max-dist",
@@ -184,6 +204,10 @@ def identify_count(
             count_espressos=count_espressos,
             detector_model=detector_model,
             object_conf_min=object_conf_min,
+            secondary_detector_model=secondary_detector_model,
+            secondary_object_conf_min=secondary_object_conf_min,
+            secondary_allowed_labels=secondary_allowed_labels,
+            secondary_merge_iou=secondary_merge_iou,
             association_max_dist=association_max_dist,
             limit_frames=limit_frames,
             beverage_hold_frames=beverage_hold_frames,

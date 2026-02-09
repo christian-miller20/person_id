@@ -8,7 +8,7 @@ from typing import Callable, Optional, TextIO
 import typer
 
 from .beverage_config import BeverageDetectorConfig
-from .beverage_detector import YoloBeverageDetector
+from .beverage_detector import MultiBeverageDetector, YoloBeverageDetector
 from .beverage_pipeline import BeveragePipeline
 from .beverage_store import BeverageStore
 from .beverage_types import BeverageEvent
@@ -212,6 +212,10 @@ def run_beverage_stage(
     count_espressos: bool,
     detector_model: Optional[str],
     object_conf_min: Optional[float],
+    secondary_detector_model: Optional[str],
+    secondary_object_conf_min: Optional[float],
+    secondary_allowed_labels: Optional[str],
+    secondary_merge_iou: float,
     association_max_dist: Optional[float],
     limit_frames: Optional[int],
     beverage_hold_frames: int,
@@ -246,6 +250,29 @@ def run_beverage_stage(
         ),
     )
     detector = YoloBeverageDetector(config=detector_config)
+    if secondary_detector_model:
+        labels_raw = secondary_allowed_labels or "espresso_shot"
+        labels = tuple(
+            label.strip() for label in labels_raw.split(",") if label.strip()
+        )
+        secondary_config = BeverageDetectorConfig(
+            model_path=secondary_detector_model,
+            conf_min=(
+                secondary_object_conf_min
+                if secondary_object_conf_min is not None
+                else BeverageDetectorConfig.conf_min
+            ),
+            allowed_labels=labels or ("espresso_shot",),
+        )
+        secondary_detector = YoloBeverageDetector(config=secondary_config)
+        detector = MultiBeverageDetector(
+            [detector, secondary_detector],
+            dedupe_iou_threshold=secondary_merge_iou,
+        )
+        typer.secho(
+            "Using dual beverage detectors (primary + secondary).",
+            fg=typer.colors.BLUE,
+        )
     beverage_pipeline = BeveragePipeline(
         detector=detector,
         association_max_dist_norm=(
