@@ -86,6 +86,13 @@ Distinct-event controls in the pipeline:
 - Minimum evidence gate: beverage track must be seen for multiple frames before counting.
 - Cooldown dedupe: repeated events for the same `(user_id, label)` inside a cooldown window are rejected.
 
+## Future Work
+
+- Implement kegerator activation triggers (door switch / motion / weight change) to capture short event clips instead of 24/7 recording.
+- Implement dedicated espresso-shot recognition with a model/class set tuned for small cup/shot-glass objects.
+- Add per-user beverage timelines and session reports (events per clip, per day, per week).
+- Expose beverage dedupe/gating knobs directly in CLI for easier field tuning.
+
 ## Output Metrics
 
 `identify` prints one line per track:
