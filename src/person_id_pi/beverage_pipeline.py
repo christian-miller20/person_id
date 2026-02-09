@@ -439,10 +439,11 @@ class BeveragePipeline:
         count_beers: bool = True,
         count_espressos: bool = False,
         limit_frames: Optional[int] = None,
+        hold_frames: int = 45,
         verbose: bool = False,
         log_fn: Optional[Callable[[str], None]] = None,
     ) -> None:
-        """Draw beverage detections onto video with display labels."""
+        """Draw beverage detections onto video with short-lived persistence."""
         cap = cv2.VideoCapture(source)
         if not cap.isOpened():
             raise RuntimeError(f"Unable to open video source {source}")
@@ -456,6 +457,11 @@ class BeveragePipeline:
         )
 
         frame_idx = 0
+        resolved_hold_frames = max(0, int(hold_frames))
+        active_overlays: Dict[
+            int, Tuple[BeverageLabel, Tuple[int, int, int, int], int]
+        ] = {}
+        next_overlay_id = 1
         while True:
             ok, frame = cap.read()
             if not ok:
@@ -464,6 +470,7 @@ class BeveragePipeline:
                 break
 
             detections = self.detector.detect(frame)
+            matched_overlay_ids: set[int] = set()
             for detection in detections:
                 if not self._is_countable_label(
                     detection.label,
@@ -471,10 +478,43 @@ class BeveragePipeline:
                     count_espressos=count_espressos,
                 ):
                     continue
+                # Re-link to an existing overlay track when possible so labels persist.
+                best_overlay_id: Optional[int] = None
+                best_iou = 0.0
+                for overlay_id, (label, bbox, last_seen) in active_overlays.items():
+                    if overlay_id in matched_overlay_ids:
+                        continue
+                    if label != detection.label:
+                        continue
+                    if frame_idx - last_seen > resolved_hold_frames:
+                        continue
+                    iou = self._iou(detection.bbox, bbox)
+                    if iou >= self.object_iou_threshold and iou > best_iou:
+                        best_iou = iou
+                        best_overlay_id = overlay_id
+                if best_overlay_id is None:
+                    best_overlay_id = next_overlay_id
+                    next_overlay_id += 1
+                active_overlays[best_overlay_id] = (
+                    detection.label,
+                    detection.bbox,
+                    frame_idx,
+                )
+                matched_overlay_ids.add(best_overlay_id)
+
+            stale_overlay_ids = [
+                overlay_id
+                for overlay_id, (_, _, last_seen) in active_overlays.items()
+                if frame_idx - last_seen > resolved_hold_frames
+            ]
+            for overlay_id in stale_overlay_ids:
+                active_overlays.pop(overlay_id, None)
+
+            for label, bbox, _ in active_overlays.values():
                 self._draw_beverage_box(
                     frame=frame,
-                    bbox=detection.bbox,
-                    display_label=self._display_label(detection.label),
+                    bbox=bbox,
+                    display_label=self._display_label(label),
                 )
             writer.write(frame)
             frame_idx += 1
@@ -487,6 +527,7 @@ class BeveragePipeline:
         count_beers: bool = True,
         count_espressos: bool = False,
         limit_frames: Optional[int] = None,
+        hold_frames: int = 45,
         verbose: bool = False,
         log_fn: Optional[Callable[[str], None]] = None,
     ) -> None:
@@ -504,6 +545,7 @@ class BeveragePipeline:
             count_beers=count_beers,
             count_espressos=count_espressos,
             limit_frames=limit_frames,
+            hold_frames=hold_frames,
             verbose=verbose,
             log_fn=log_fn,
         )

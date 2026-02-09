@@ -147,6 +147,11 @@ def identify_count(
         "--association-max-dist",
         help="Optional override for maximum distance threshold for associating beverage events with identified users.",
     ),
+    beverage_hold_frames: int = typer.Option(
+        45,
+        "--beverage-hold-frames",
+        help="How many frames to keep BEER/ESPRESSO overlay visible after last detection.",
+    ),
 ) -> None:
     identity = _build_identity(store_path)
     pipeline = FacePipeline(embedder=FaceEmbedder(), identity=identity)
@@ -180,10 +185,25 @@ def identify_count(
             object_conf_min=object_conf_min,
             association_max_dist=association_max_dist,
             limit_frames=limit_frames,
+            beverage_hold_frames=beverage_hold_frames,
             verbose=verbose,
             log_fn=log_fn,
         )
-        running_beer_label = build_running_beer_label_resolver(beverage_result.events)
+        this_run_persisted_beers: dict[str, int] = {}
+        for event in beverage_result.persisted_events:
+            if event.beverage_label not in {"cup", "can", "bottle"}:
+                continue
+            this_run_persisted_beers[event.user_id] = (
+                this_run_persisted_beers.get(event.user_id, 0) + 1
+            )
+        baseline_beers_by_user = {
+            user_id: max(0, total - this_run_persisted_beers.get(user_id, 0))
+            for user_id, total in beverage_result.beer_totals.items()
+        }
+        running_beer_label = build_running_beer_label_resolver(
+            beverage_result.events,
+            baseline_beers_by_user=baseline_beers_by_user,
+        )
         pipeline.write_multi_face_annotations_in_place(
             video_path=output_path,
             frame_annotations=face_result.frame_annotations,

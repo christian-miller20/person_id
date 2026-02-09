@@ -30,6 +30,7 @@ class BeverageStageResult:
     detected_events: int
     persisted_new: int
     events: list[BeverageEvent]
+    persisted_events: list[BeverageEvent]
 
 
 def default_annotate_output_path(source: str) -> Path:
@@ -68,6 +69,7 @@ def build_log_writer(
 
 def build_running_beer_label_resolver(
     events: list[BeverageEvent],
+    baseline_beers_by_user: Optional[dict[str, int]] = None,
 ) -> Callable[[int, int, Optional[IdentityDecision]], Optional[str]]:
     beer_events_by_frame: dict[int, list[str]] = defaultdict(list)
     for event in events:
@@ -75,6 +77,9 @@ def build_running_beer_label_resolver(
             beer_events_by_frame[event.frame_idx].append(event.user_id)
 
     running_beers_by_user: dict[str, int] = defaultdict(int)
+    if baseline_beers_by_user:
+        for user_id, total in baseline_beers_by_user.items():
+            running_beers_by_user[user_id] = int(total)
     last_applied_frame = -1
 
     def _resolver(
@@ -185,6 +190,7 @@ def run_beverage_stage(
     object_conf_min: Optional[float],
     association_max_dist: Optional[float],
     limit_frames: Optional[int],
+    beverage_hold_frames: int,
     verbose: bool,
     log_fn: Optional[Callable[[str], None]],
 ) -> BeverageStageResult:
@@ -204,6 +210,7 @@ def run_beverage_stage(
             detected_events=0,
             persisted_new=0,
             events=[],
+            persisted_events=[],
         )
 
     detector_config = BeverageDetectorConfig(
@@ -234,9 +241,11 @@ def run_beverage_stage(
 
     store = BeverageStore(events_store)
     added = 0
+    persisted_events: list[BeverageEvent] = []
     for event in events:
         if store.add_event(event):
             added += 1
+            persisted_events.append(event)
 
     beer_totals = store.total_beers_by_user()
     espresso_totals = store.total_espressos_by_user()
@@ -257,6 +266,7 @@ def run_beverage_stage(
             count_beers=count_beers,
             count_espressos=count_espressos,
             limit_frames=limit_frames,
+            hold_frames=beverage_hold_frames,
             verbose=verbose,
             log_fn=log_fn,
         )
@@ -270,4 +280,5 @@ def run_beverage_stage(
         detected_events=len(events),
         persisted_new=added,
         events=events,
+        persisted_events=persisted_events,
     )
