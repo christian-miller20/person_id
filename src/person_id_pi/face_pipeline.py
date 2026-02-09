@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
 import cv2
@@ -11,6 +12,7 @@ from .face_embedder import FaceEmbedder
 from .face_types import FaceEmbedding, IdentityDecision, TrackletEmbedding
 from .identity_engine import IdentityEngine
 
+
 # ActiveTrack represents a currently tracked face across frames, along with its last bounding box, last seen frame index, and collected embeddings for identity aggregation.
 @dataclass
 class ActiveTrack:
@@ -18,6 +20,7 @@ class ActiveTrack:
     last_bbox: Tuple[int, int, int, int]
     last_seen: int
     embeddings: List[FaceEmbedding] = field(default_factory=list)
+
 
 # FrameTrackAnnotation represents a single detected face track on a specific frame, including its track ID and bounding box.
 @dataclass
@@ -252,6 +255,10 @@ class FacePipeline:
         output_path: Path | str,
         frame_annotations: List[List[FrameTrackAnnotation]],
         decisions: Dict[int, IdentityDecision],
+        label_overrides: Optional[Dict[int, str]] = None,
+        label_resolver: Optional[
+            Callable[[int, int, Optional[IdentityDecision]], Optional[str]]
+        ] = None,
     ) -> None:
         cap = self._open_video_source(source)
         fps = cap.get(cv2.CAP_PROP_FPS)
@@ -275,6 +282,12 @@ class FacePipeline:
                 decision = decisions.get(item.track_id)
                 accepted = bool(decision and decision.accepted and decision.user_id)
                 label = decision.user_id if accepted and decision else "unknown"
+                if label_overrides and item.track_id in label_overrides:
+                    label = label_overrides[item.track_id]
+                if label_resolver is not None:
+                    resolved_label = label_resolver(frame_idx, item.track_id, decision)
+                    if resolved_label is not None:
+                        label = resolved_label
                 self._draw_box_with_label(
                     frame, item.bbox, str(label), accepted=accepted
                 )
@@ -284,6 +297,33 @@ class FacePipeline:
                 break
         writer.release()
         cap.release()
+
+    def write_multi_face_annotations_in_place(
+        self,
+        video_path: Path | str,
+        frame_annotations: List[List[FrameTrackAnnotation]],
+        decisions: Dict[int, IdentityDecision],
+        label_overrides: Optional[Dict[int, str]] = None,
+        label_resolver: Optional[
+            Callable[[int, int, Optional[IdentityDecision]], Optional[str]]
+        ] = None,
+    ) -> None:
+        target = Path(video_path)
+        with NamedTemporaryFile(
+            suffix=target.suffix or ".mp4",
+            dir=str(target.parent),
+            delete=False,
+        ) as tmp:
+            tmp_path = Path(tmp.name)
+        self.write_multi_face_annotations(
+            source=str(target),
+            output_path=tmp_path,
+            frame_annotations=frame_annotations,
+            decisions=decisions,
+            label_overrides=label_overrides,
+            label_resolver=label_resolver,
+        )
+        tmp_path.replace(target)
 
     def extract_tracklets_with_annotations_from_video(
         self,

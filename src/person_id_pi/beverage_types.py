@@ -3,9 +3,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, Literal, Tuple
 
+# Canonical beverage labels used throughout detection, events, and storage.
 BeverageLabel = Literal["cup", "can", "bottle", "espresso_shot"]
-BeerLabels = {"can", "bottle", "cup"}  # Assuming "cup" can also represent beer in some contexts
+BeerLabels = {
+    "can",
+    "bottle",
+    "cup",
+}  # "cup" is intentionally included per current counting policy.
 EspressoLabels = {"espresso_shot"}
+
 
 @dataclass(frozen=True)
 class BeverageDetection:
@@ -13,6 +19,7 @@ class BeverageDetection:
     bbox: Tuple[int, int, int, int]
     label: BeverageLabel
     score: float  # Confidence score from the beverage detector (e.g., YOLOv8)
+
 
 @dataclass(frozen=True)
 class BeverageEvent:
@@ -62,8 +69,10 @@ class BeverageEvent:
             timestamp_utc=str(payload["timestamp_utc"]),
         )
 
+
 @dataclass(frozen=True)
 class PerUserBeverageSummary:
+    # Counts for one user, split by current-video and all-time totals.
     user_id: str
     beers_in_video: int
     beers_total: int

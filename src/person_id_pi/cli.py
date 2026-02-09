@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Optional
 
 import typer
 
-from .cli_helpers import run_beverage_stage, run_face_stage
+from .cli_helpers import (
+    build_log_writer,
+    build_running_beer_label_resolver,
+    default_annotate_output_path,
+    run_beverage_stage,
+    run_face_stage,
+)
 from .face_embedder import FaceEmbedder
 from .face_pipeline import FacePipeline
 from .identity_config import IdentityConfig
@@ -19,40 +25,6 @@ def _build_identity(store_path: Path) -> IdentityEngine:
     store = IdentityStore(store_path)
     config = IdentityConfig()
     return IdentityEngine(store=store, config=config)
-
-
-def _default_annotate_output_path(source: str) -> Path:
-    src = Path(source)
-    stem = src.stem if src.suffix else src.name
-    return Path("runs") / f"{stem}_annotated.mp4"
-
-
-def _default_log_path(source: str) -> Path:
-    src = Path(source)
-    stem = src.stem if src.suffix else src.name
-    return Path("logs") / f"{stem}.log"
-
-
-def _build_log_writer(
-    source: str,
-    verbose: bool,
-    tee_logs: bool,
-) -> tuple[Optional[Callable[[str], None]], Optional[object]]:
-    if not verbose:
-        return None, None
-    log_path = _default_log_path(source)
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    log_handle = log_path.open("w", encoding="utf-8")
-    typer.secho(f"Verbose logs written to {log_path}", fg=typer.colors.BLUE)
-
-    def _file_only(message: str) -> None:
-        log_handle.write(f"{message}\n")
-
-    def _tee(message: str) -> None:
-        log_handle.write(f"{message}\n")
-        print(message)
-
-    return (_tee if tee_logs else _file_only), log_handle
 
 
 @app.command()
@@ -90,8 +62,8 @@ def identify(
 ) -> None:
     identity = _build_identity(store_path)
     pipeline = FacePipeline(embedder=FaceEmbedder(), identity=identity)
-    output_path = annotate_output or _default_annotate_output_path(source)
-    log_fn, log_handle = _build_log_writer(
+    output_path = annotate_output or default_annotate_output_path(source)
+    log_fn, log_handle = build_log_writer(
         source=source,
         verbose=verbose,
         tee_logs=tee_logs,
@@ -178,8 +150,8 @@ def identify_count(
 ) -> None:
     identity = _build_identity(store_path)
     pipeline = FacePipeline(embedder=FaceEmbedder(), identity=identity)
-    output_path = annotate_output or _default_annotate_output_path(source)
-    log_fn, log_handle = _build_log_writer(
+    output_path = annotate_output or default_annotate_output_path(source)
+    log_fn, log_handle = build_log_writer(
         source=source,
         verbose=verbose,
         tee_logs=tee_logs,
@@ -197,8 +169,9 @@ def identify_count(
             update_templates=update_templates,
             auto_enroll_unknown=auto_enroll_unknown,
         )
-        run_beverage_stage(
+        beverage_result = run_beverage_stage(
             source=source,
+            annotate_output_path=output_path,
             face_result=face_result,
             events_store=events_store,
             count_beers=count_beers,
@@ -209,6 +182,17 @@ def identify_count(
             limit_frames=limit_frames,
             verbose=verbose,
             log_fn=log_fn,
+        )
+        running_beer_label = build_running_beer_label_resolver(beverage_result.events)
+        pipeline.write_multi_face_annotations_in_place(
+            video_path=output_path,
+            frame_annotations=face_result.frame_annotations,
+            decisions=face_result.decisions_by_track,
+            label_resolver=running_beer_label,
+        )
+        typer.secho(
+            f"Face labels updated with running beer counts in {output_path}",
+            fg=typer.colors.GREEN,
         )
     finally:
         if log_handle is not None:

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Optional, TextIO
 
 import typer
 
@@ -10,6 +11,7 @@ from .beverage_config import BeverageDetectorConfig
 from .beverage_detector import YoloBeverageDetector
 from .beverage_pipeline import BeveragePipeline
 from .beverage_store import BeverageStore
+from .beverage_types import BeverageEvent
 from .face_pipeline import FacePipeline, FrameTrackAnnotation
 from .face_types import IdentityDecision
 from .identity_engine import IdentityEngine
@@ -21,8 +23,81 @@ class FaceStageResult:
     decisions_by_track: dict[int, IdentityDecision]
 
 
+@dataclass(frozen=True)
+class BeverageStageResult:
+    beer_totals: dict[str, int]
+    espresso_totals: dict[str, int]
+    detected_events: int
+    persisted_new: int
+    events: list[BeverageEvent]
+
+
+def default_annotate_output_path(source: str) -> Path:
+    src = Path(source)
+    stem = src.stem if src.suffix else src.name
+    return Path("runs") / f"{stem}_annotated.mp4"
+
+
+def default_log_path(source: str) -> Path:
+    src = Path(source)
+    stem = src.stem if src.suffix else src.name
+    return Path("logs") / f"{stem}.log"
+
+
+def build_log_writer(
+    source: str,
+    verbose: bool,
+    tee_logs: bool,
+) -> tuple[Optional[Callable[[str], None]], Optional[TextIO]]:
+    if not verbose:
+        return None, None
+    log_path = default_log_path(source)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_handle = log_path.open("w", encoding="utf-8")
+    typer.secho(f"Verbose logs written to {log_path}", fg=typer.colors.BLUE)
+
+    def _file_only(message: str) -> None:
+        log_handle.write(f"{message}\n")
+
+    def _tee(message: str) -> None:
+        log_handle.write(f"{message}\n")
+        print(message)
+
+    return (_tee if tee_logs else _file_only), log_handle
+
+
+def build_running_beer_label_resolver(
+    events: list[BeverageEvent],
+) -> Callable[[int, int, Optional[IdentityDecision]], Optional[str]]:
+    beer_events_by_frame: dict[int, list[str]] = defaultdict(list)
+    for event in events:
+        if event.beverage_label in {"cup", "can", "bottle"}:
+            beer_events_by_frame[event.frame_idx].append(event.user_id)
+
+    running_beers_by_user: dict[str, int] = defaultdict(int)
+    last_applied_frame = -1
+
+    def _resolver(
+        frame_idx: int, track_id: int, decision: Optional[IdentityDecision]
+    ) -> Optional[str]:
+        nonlocal last_applied_frame
+        _ = track_id
+        if frame_idx > last_applied_frame:
+            for idx in range(last_applied_frame + 1, frame_idx + 1):
+                for user_id in beer_events_by_frame.get(idx, []):
+                    running_beers_by_user[user_id] += 1
+            last_applied_frame = frame_idx
+        if not (decision and decision.accepted and decision.user_id):
+            return None
+        return (
+            f"{decision.user_id} beers={running_beers_by_user.get(decision.user_id, 0)}"
+        )
+
+    return _resolver
+
+
 def run_face_stage(
-    *, 
+    *,
     source: str,
     identity: IdentityEngine,
     pipeline: FacePipeline,
@@ -101,6 +176,7 @@ def run_face_stage(
 def run_beverage_stage(
     *,
     source: str,
+    annotate_output_path: Optional[Path],
     face_result: FaceStageResult,
     events_store: Path,
     count_beers: bool,
@@ -111,7 +187,7 @@ def run_beverage_stage(
     limit_frames: Optional[int],
     verbose: bool,
     log_fn: Optional[Callable[[str], None]],
-) -> None:
+) -> BeverageStageResult:
     track_to_user: dict[int, str] = {
         track_id: decision.user_id
         for track_id, decision in face_result.decisions_by_track.items()
@@ -122,7 +198,13 @@ def run_beverage_stage(
             "No accepted identities; skipping beverage event extraction.",
             fg=typer.colors.YELLOW,
         )
-        return
+        return BeverageStageResult(
+            beer_totals={},
+            espresso_totals={},
+            detected_events=0,
+            persisted_new=0,
+            events=[],
+        )
 
     detector_config = BeverageDetectorConfig(
         model_path=detector_model or BeverageDetectorConfig.model_path,
@@ -168,3 +250,24 @@ def run_beverage_stage(
             f"espressos_total={espresso_totals.get(user_id, 0)}",
             fg=typer.colors.BLUE,
         )
+
+    if annotate_output_path is not None:
+        beverage_pipeline.annotate_video_in_place(
+            video_path=annotate_output_path,
+            count_beers=count_beers,
+            count_espressos=count_espressos,
+            limit_frames=limit_frames,
+            verbose=verbose,
+            log_fn=log_fn,
+        )
+        typer.secho(
+            f"Beverage boxes written to {annotate_output_path}",
+            fg=typer.colors.GREEN,
+        )
+    return BeverageStageResult(
+        beer_totals=beer_totals,
+        espresso_totals=espresso_totals,
+        detected_events=len(events),
+        persisted_new=added,
+        events=events,
+    )

@@ -7,7 +7,7 @@ import numpy as np
 from .beverage_config import BeverageDetectorConfig
 from .beverage_types import BeverageDetection, BeverageLabel
 
-
+# Maps model-provided class names to the constrained internal beverage labels.
 LABEL_ALIASES = {
     "cup": "cup",
     "can": "can",
@@ -21,11 +21,13 @@ LABEL_ALIASES = {
 
 
 class BeverageDetector(Protocol):
-    def detect(self, frame: np.ndarray) -> List[BeverageDetection]:
-        ...
+    """Minimal detector interface required by BeveragePipeline."""
+
+    def detect(self, frame: np.ndarray) -> List[BeverageDetection]: ...
 
 
 def _normalize_label(raw_label: str) -> Optional[BeverageLabel]:
+    """Normalize arbitrary model labels into supported internal labels."""
     normalized = LABEL_ALIASES.get(raw_label.lower().strip())
     if normalized is None:
         return None
@@ -33,6 +35,7 @@ def _normalize_label(raw_label: str) -> Optional[BeverageLabel]:
 
 
 def _to_list(values: object) -> List[float]:
+    """Convert tensor-like values (torch/ndarray/list/scalar) to flat float list."""
     if hasattr(values, "tolist"):
         result = values.tolist()
         if isinstance(result, list):
@@ -46,6 +49,8 @@ def _to_list(values: object) -> List[float]:
 
 
 class YoloBeverageDetector:
+    """YOLO-backed beverage detector with strict label and confidence filtering."""
+
     def __init__(
         self,
         config: Optional[BeverageDetectorConfig] = None,
@@ -66,6 +71,7 @@ class YoloBeverageDetector:
         self._model = YOLO(self.config.model_path)
 
     def _parse_results(self, results: Sequence[object]) -> List[BeverageDetection]:
+        """Parse Ultralytics result objects into BeverageDetection rows."""
         detections: List[BeverageDetection] = []
         for result in results:
             names = getattr(result, "names", {}) or {}
@@ -90,6 +96,7 @@ class YoloBeverageDetector:
                 cls_idx = int(cls_values[i])
                 raw_label = str(names.get(cls_idx, ""))
                 label = _normalize_label(raw_label)
+                # Reject unknown or disallowed labels so downstream counting stays stable.
                 if label is None or label.lower() not in self._allowed_labels:
                     continue
                 x1, y1, x2, y2 = xyxy_values[i * 4 : (i + 1) * 4]
@@ -103,6 +110,7 @@ class YoloBeverageDetector:
         return detections
 
     def detect(self, frame: np.ndarray) -> List[BeverageDetection]:
+        """Run one-frame detection and return normalized beverage detections."""
         results = self._model(frame, verbose=False)
         if not isinstance(results, Sequence):
             results = [results]
