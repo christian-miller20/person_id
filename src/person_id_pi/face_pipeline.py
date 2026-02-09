@@ -11,7 +11,7 @@ from .face_embedder import FaceEmbedder
 from .face_types import FaceEmbedding, IdentityDecision, TrackletEmbedding
 from .identity_engine import IdentityEngine
 
-
+# ActiveTrack represents a currently tracked face across frames, along with its last bounding box, last seen frame index, and collected embeddings for identity aggregation.
 @dataclass
 class ActiveTrack:
     track_id: int
@@ -19,7 +19,7 @@ class ActiveTrack:
     last_seen: int
     embeddings: List[FaceEmbedding] = field(default_factory=list)
 
-
+# FrameTrackAnnotation represents a single detected face track on a specific frame, including its track ID and bounding box.
 @dataclass
 class FrameTrackAnnotation:
     track_id: int

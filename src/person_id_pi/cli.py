@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import typer
 
+from .cli_helpers import run_beverage_stage, run_face_stage
 from .face_embedder import FaceEmbedder
 from .face_pipeline import FacePipeline
-from .face_types import IdentityDecision
 from .identity_config import IdentityConfig
 from .identity_engine import IdentityEngine
 from .identity_store import IdentityStore
@@ -31,6 +31,28 @@ def _default_log_path(source: str) -> Path:
     src = Path(source)
     stem = src.stem if src.suffix else src.name
     return Path("logs") / f"{stem}.log"
+
+
+def _build_log_writer(
+    source: str,
+    verbose: bool,
+    tee_logs: bool,
+) -> tuple[Optional[Callable[[str], None]], Optional[object]]:
+    if not verbose:
+        return None, None
+    log_path = _default_log_path(source)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_handle = log_path.open("w", encoding="utf-8")
+    typer.secho(f"Verbose logs written to {log_path}", fg=typer.colors.BLUE)
+
+    def _file_only(message: str) -> None:
+        log_handle.write(f"{message}\n")
+
+    def _tee(message: str) -> None:
+        log_handle.write(f"{message}\n")
+        print(message)
+
+    return (_tee if tee_logs else _file_only), log_handle
 
 
 @app.command()
@@ -69,154 +91,129 @@ def identify(
     identity = _build_identity(store_path)
     pipeline = FacePipeline(embedder=FaceEmbedder(), identity=identity)
     output_path = annotate_output or _default_annotate_output_path(source)
-    log_path = _default_log_path(source)
-    log_fn = None
-    if verbose:
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        log_handle = log_path.open("w", encoding="utf-8")
-        typer.secho(f"Verbose logs written to {log_path}", fg=typer.colors.BLUE)
-        log_fn = (
-            (lambda message: (log_handle.write(f"{message}\n"), print(message))[0])
-            if tee_logs
-            else (lambda message: log_handle.write(f"{message}\n"))
-        )
-
+    log_fn, log_handle = _build_log_writer(
+        source=source,
+        verbose=verbose,
+        tee_logs=tee_logs,
+    )
     try:
-        tracklets_by_id, frame_annotations = (
-            pipeline.extract_tracklets_with_annotations_from_video(
-                source=source,
-                limit_frames=limit_frames,
-                verbose=verbose,
-                log_fn=log_fn,
-            )
-        )
-        decisions_by_track = {}
-        for track_id in sorted(tracklets_by_id.keys()):
-            tracklet = tracklets_by_id[track_id]
-            decision = identity.match(tracklet)
-            auto_enroll_status: Optional[str] = None
-            # if match, update embedding for user if update_templates is enabled
-            if (
-                update_templates
-                and decision.user_id
-                and identity.should_update_templates(decision, tracklet)
-            ):
-                identity.update_templates(decision.user_id, tracklet)
-            # if not a match and auto_enroll_unknown is enabled, create new user and enroll
-            if auto_enroll_unknown:
-                block_reason = identity.auto_enroll_block_reason(decision, tracklet)
-                if block_reason is None:
-                    new_user_id = identity.store.generate_new_user_id()
-                    added = identity.update_templates(new_user_id, tracklet)
-                    if added:
-                        decision = IdentityDecision(
-                            user_id=new_user_id,
-                            score=decision.score,
-                            margin=decision.margin,
-                            accepted=True,
-                            reason="auto_enrolled_unknown",
-                        )
-                        auto_enroll_status = "enrolled"
-                    else:
-                        auto_enroll_status = "rejected:template_too_similar"
-                else:
-                    auto_enroll_status = f"rejected:{block_reason}"
-            decisions_by_track[track_id] = decision
-            fields = [
-                f"track={track_id}",
-                f"accepted={decision.accepted}",
-                f"user_id={decision.user_id}",
-                f"score={decision.score:.3f}",
-                f"margin={decision.margin:.3f}",
-                f"n_used={tracklet.n_used}",
-                f"dispersion={tracklet.dispersion:.3f}",
-                f"reason={decision.reason}",
-            ]
-            if auto_enroll_unknown:
-                fields.append(f"auto_enroll={auto_enroll_status}")
-            typer.secho(" ".join(fields), fg=typer.colors.CYAN)
-        pipeline.write_multi_face_annotations(
+        run_face_stage(
             source=source,
+            identity=identity,
+            pipeline=pipeline,
             output_path=output_path,
-            frame_annotations=frame_annotations,
-            decisions=decisions_by_track,
+            limit_frames=limit_frames,
+            verbose=verbose,
+            log_fn=log_fn,
+            update_templates=update_templates,
+            auto_enroll_unknown=auto_enroll_unknown,
         )
-        typer.secho(f"Annotated video written to {output_path}", fg=typer.colors.GREEN)
     finally:
-        if verbose:
+        if log_handle is not None:
             log_handle.close()
 
-# @app.command()
-# def identify_count(    
-#         source: str = typer.Argument(..., help="Path to video file or camera index."),
-#         store_path: Path = typer.Option(
-#             Path("profiles/face_templates.json"), "--store", help="Template store path."
-#         ),
-#         limit_frames: Optional[int] = typer.Option(
-#             None, "--limit-frames", help="Stop after N frames for quick checks."
-#         ),
-#         verbose: bool = typer.Option(
-#             True, "--verbose/--quiet", help="Print per-frame processing updates."
-#         ),
-#         update_templates: bool = typer.Option(
-#             False,
-#             "--update-templates/--no-update-templates",
-#             help="Update templates on high-confidence matches.",
-#         ),
-#         annotate_output: Optional[Path] = typer.Option(
-#             None,
-#             "--annotate-output",
-#             help="Write annotated output video with bounding boxes and identified user IDs.",
-#         ),
-#         auto_enroll_unknown: bool = typer.Option(
-#             False,
-#             "--auto-enroll-unknown/--no-auto-enroll-unknown",
-#             help="Automatically enroll unknown identities with generated user IDs.",
-#         ),
-#         tee_logs: bool = typer.Option(
-#             False,
-#             "--tee-logs/--no-tee-logs",
-#             help="Also mirror verbose frame logs to stdout while writing logs/<video_input>.log.",
-#         ),
-#         events_store: Path = typer.Option(
-#             Path("profiles/beverage_events.json"),
-#             "--events-store",
-#             help="Path to store detected beverage events.",
-#         ),
-#         count_beers: bool = typer.Option(
-#             True,
-#             "--count-beers/--no-count-beers",
-#             help="Whether to count beer consumption events.",
-#         ),
-#         count_espressos: bool = typer.Option(
-#             False,
-#             "--count-espressos/--no-count-espressos",
-#             help="Whether to count espresso consumption events.",
-#         ),
-#         beverage_annotate: bool = typer.Option(
-#             True,
-#             "--beverage-annotate/--no-beverage-annotate",
-#             help="Whether to annotate detected beverage events in the output video",
-#         ),
-#         detector_model: Optional[str] = typer.Option(
-#             None,
-#             "--detector-model",
-#             help="Optional custom detector model path or name for beverage event detection.",
-#         ),
-#         object_conf_min: Optional[float] = typer.Option(
-#             None,
-#             "--object-conf-min",
-#             help="Optional override for minimum object confidence threshold for beverage event detection.",
-#         ),
-#         association_max_dist: Optional[float] = typer.Option(
-#             None,
-#             "--association-max-dist",
-#             help="Optional override for maximum distance threshold for associating beverage events with identified users.",
-#         ),
-#     ) -> None:
 
+@app.command("identify-count")
+def identify_count(
+    source: str = typer.Argument(..., help="Path to video file or camera index."),
+    store_path: Path = typer.Option(
+        Path("profiles/face_templates.json"), "--store", help="Template store path."
+    ),
+    limit_frames: Optional[int] = typer.Option(
+        None, "--limit-frames", help="Stop after N frames for quick checks."
+    ),
+    verbose: bool = typer.Option(
+        True, "--verbose/--quiet", help="Print per-frame processing updates."
+    ),
+    update_templates: bool = typer.Option(
+        False,
+        "--update-templates/--no-update-templates",
+        help="Update templates on high-confidence matches.",
+    ),
+    annotate_output: Optional[Path] = typer.Option(
+        None,
+        "--annotate-output",
+        help="Write annotated output video with bounding boxes and identified user IDs.",
+    ),
+    auto_enroll_unknown: bool = typer.Option(
+        False,
+        "--auto-enroll-unknown/--no-auto-enroll-unknown",
+        help="Automatically enroll unknown identities with generated user IDs.",
+    ),
+    tee_logs: bool = typer.Option(
+        False,
+        "--tee-logs/--no-tee-logs",
+        help="Also mirror verbose frame logs to stdout while writing logs/<video_input>.log.",
+    ),
+    events_store: Path = typer.Option(
+        Path("profiles/beverage_events.json"),
+        "--events-store",
+        help="Path to store detected beverage events.",
+    ),
+    count_beers: bool = typer.Option(
+        True,
+        "--count-beers/--no-count-beers",
+        help="Whether to count beer consumption events.",
+    ),
+    count_espressos: bool = typer.Option(
+        False,
+        "--count-espressos/--no-count-espressos",
+        help="Whether to count espresso consumption events.",
+    ),
+    detector_model: Optional[str] = typer.Option(
+        None,
+        "--detector-model",
+        help="Optional custom detector model path or name for beverage event detection.",
+    ),
+    object_conf_min: Optional[float] = typer.Option(
+        None,
+        "--object-conf-min",
+        help="Optional override for minimum object confidence threshold for beverage event detection.",
+    ),
+    association_max_dist: Optional[float] = typer.Option(
+        None,
+        "--association-max-dist",
+        help="Optional override for maximum distance threshold for associating beverage events with identified users.",
+    ),
+) -> None:
+    identity = _build_identity(store_path)
+    pipeline = FacePipeline(embedder=FaceEmbedder(), identity=identity)
+    output_path = annotate_output or _default_annotate_output_path(source)
+    log_fn, log_handle = _build_log_writer(
+        source=source,
+        verbose=verbose,
+        tee_logs=tee_logs,
+    )
 
-    
+    try:
+        face_result = run_face_stage(
+            source=source,
+            identity=identity,
+            pipeline=pipeline,
+            output_path=output_path,
+            limit_frames=limit_frames,
+            verbose=verbose,
+            log_fn=log_fn,
+            update_templates=update_templates,
+            auto_enroll_unknown=auto_enroll_unknown,
+        )
+        run_beverage_stage(
+            source=source,
+            face_result=face_result,
+            events_store=events_store,
+            count_beers=count_beers,
+            count_espressos=count_espressos,
+            detector_model=detector_model,
+            object_conf_min=object_conf_min,
+            association_max_dist=association_max_dist,
+            limit_frames=limit_frames,
+            verbose=verbose,
+            log_fn=log_fn,
+        )
+    finally:
+        if log_handle is not None:
+            log_handle.close()
+
 
 @app.command()
 def enroll(
