@@ -101,6 +101,30 @@ def build_running_beer_label_resolver(
     return _resolver
 
 
+def compute_baseline_beers_by_user(
+    *,
+    beer_totals: dict[str, int],
+    persisted_events: list[BeverageEvent],
+) -> dict[str, int]:
+    """
+    Compute lifetime beer totals *before* this run's newly persisted events.
+
+    This keeps running overlay labels stable and prevents double-attributing
+    counts when we replay current-video events on the timeline.
+    """
+    this_run_persisted_beers: dict[str, int] = {}
+    for event in persisted_events:
+        if event.beverage_label not in {"cup", "can", "bottle"}:
+            continue
+        this_run_persisted_beers[event.user_id] = (
+            this_run_persisted_beers.get(event.user_id, 0) + 1
+        )
+    return {
+        user_id: max(0, total - this_run_persisted_beers.get(user_id, 0))
+        for user_id, total in beer_totals.items()
+    }
+
+
 def run_face_stage(
     *,
     source: str,

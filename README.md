@@ -40,6 +40,7 @@ python -m person_id_pi.cli enroll alice data/clip.mp4 --store profiles/face_temp
 python -m person_id_pi.cli identify data/clip.mp4 --store profiles/face_templates.json --verbose --update-templates
 python -m person_id_pi.cli identify data/clip.mp4 --store profiles/face_templates.json --verbose --auto-enroll-unknown
 python -m person_id_pi.cli identify data/clip.mp4 --store profiles/face_templates.json --annotate-output runs/annotated.mp4
+python -m person_id_pi.cli identify-count data/clip.mp4 --store profiles/face_templates.json --events-store profiles/beverage_events.json --tee-logs
 python -m person_id_pi.cli rename-user user_0002 bob --store profiles/face_templates.json
 ```
 
@@ -59,6 +60,31 @@ python -m person_id_pi.cli rename-user user_0002 bob --store profiles/face_templ
 - With `--verbose`, frame logs are written to `logs/<video_name>.log`; add `--tee-logs` to also mirror them to stdout.
 - Use `--annotate-output path/to/out.mp4` to override annotated output location.
 - The identity engine + template store are implemented and testable today.
+
+## Identify + Count (Beverages)
+
+`identify-count` runs face identity plus beverage detection/counting.
+
+- Face boxes remain annotated with identity labels.
+- Beverage objects are annotated in-video:
+  - `BEER` for `cup` / `can` / `bottle`
+  - `ESPRESSO` for `espresso_shot`
+- Accepted face labels are rewritten with a running beer counter:
+  - `user_id beers=<lifetime_before_run + beers_seen_in_this_video_so_far>`
+
+Key flags:
+
+- `--events-store profiles/beverage_events.json`: persisted beverage event store.
+- `--count-beers/--no-count-beers`: enable/disable beer-like labels.
+- `--count-espressos/--no-count-espressos`: enable/disable espresso label counting.
+- `--beverage-hold-frames N`: keep beverage overlay labels visible for `N` frames after last detection (default `45`).
+- `--object-conf-min`: override detector confidence threshold.
+- `--association-max-dist`: override beverage-to-person association distance threshold.
+
+Distinct-event controls in the pipeline:
+
+- Minimum evidence gate: beverage track must be seen for multiple frames before counting.
+- Cooldown dedupe: repeated events for the same `(user_id, label)` inside a cooldown window are rejected.
 
 ## Output Metrics
 

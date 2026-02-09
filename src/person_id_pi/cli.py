@@ -8,6 +8,7 @@ import typer
 from .cli_helpers import (
     build_log_writer,
     build_running_beer_label_resolver,
+    compute_baseline_beers_by_user,
     default_annotate_output_path,
     run_beverage_stage,
     run_face_stage,
@@ -189,17 +190,10 @@ def identify_count(
             verbose=verbose,
             log_fn=log_fn,
         )
-        this_run_persisted_beers: dict[str, int] = {}
-        for event in beverage_result.persisted_events:
-            if event.beverage_label not in {"cup", "can", "bottle"}:
-                continue
-            this_run_persisted_beers[event.user_id] = (
-                this_run_persisted_beers.get(event.user_id, 0) + 1
-            )
-        baseline_beers_by_user = {
-            user_id: max(0, total - this_run_persisted_beers.get(user_id, 0))
-            for user_id, total in beverage_result.beer_totals.items()
-        }
+        baseline_beers_by_user = compute_baseline_beers_by_user(
+            beer_totals=beverage_result.beer_totals,
+            persisted_events=beverage_result.persisted_events,
+        )
         running_beer_label = build_running_beer_label_resolver(
             beverage_result.events,
             baseline_beers_by_user=baseline_beers_by_user,
