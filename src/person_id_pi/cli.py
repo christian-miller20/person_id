@@ -146,6 +146,77 @@ def identify(
         if verbose:
             log_handle.close()
 
+# @app.command()
+# def identify_count(    
+#         source: str = typer.Argument(..., help="Path to video file or camera index."),
+#         store_path: Path = typer.Option(
+#             Path("profiles/face_templates.json"), "--store", help="Template store path."
+#         ),
+#         limit_frames: Optional[int] = typer.Option(
+#             None, "--limit-frames", help="Stop after N frames for quick checks."
+#         ),
+#         verbose: bool = typer.Option(
+#             True, "--verbose/--quiet", help="Print per-frame processing updates."
+#         ),
+#         update_templates: bool = typer.Option(
+#             False,
+#             "--update-templates/--no-update-templates",
+#             help="Update templates on high-confidence matches.",
+#         ),
+#         annotate_output: Optional[Path] = typer.Option(
+#             None,
+#             "--annotate-output",
+#             help="Write annotated output video with bounding boxes and identified user IDs.",
+#         ),
+#         auto_enroll_unknown: bool = typer.Option(
+#             False,
+#             "--auto-enroll-unknown/--no-auto-enroll-unknown",
+#             help="Automatically enroll unknown identities with generated user IDs.",
+#         ),
+#         tee_logs: bool = typer.Option(
+#             False,
+#             "--tee-logs/--no-tee-logs",
+#             help="Also mirror verbose frame logs to stdout while writing logs/<video_input>.log.",
+#         ),
+#         events_store: Path = typer.Option(
+#             Path("profiles/beverage_events.json"),
+#             "--events-store",
+#             help="Path to store detected beverage events.",
+#         ),
+#         count_beers: bool = typer.Option(
+#             True,
+#             "--count-beers/--no-count-beers",
+#             help="Whether to count beer consumption events.",
+#         ),
+#         count_espressos: bool = typer.Option(
+#             False,
+#             "--count-espressos/--no-count-espressos",
+#             help="Whether to count espresso consumption events.",
+#         ),
+#         beverage_annotate: bool = typer.Option(
+#             True,
+#             "--beverage-annotate/--no-beverage-annotate",
+#             help="Whether to annotate detected beverage events in the output video",
+#         ),
+#         detector_model: Optional[str] = typer.Option(
+#             None,
+#             "--detector-model",
+#             help="Optional custom detector model path or name for beverage event detection.",
+#         ),
+#         object_conf_min: Optional[float] = typer.Option(
+#             None,
+#             "--object-conf-min",
+#             help="Optional override for minimum object confidence threshold for beverage event detection.",
+#         ),
+#         association_max_dist: Optional[float] = typer.Option(
+#             None,
+#             "--association-max-dist",
+#             help="Optional override for maximum distance threshold for associating beverage events with identified users.",
+#         ),
+#     ) -> None:
+
+
+    
 
 @app.command()
 def enroll(
